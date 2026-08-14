@@ -1,0 +1,26 @@
+{
+  "name": "codely-unity-lsp-server",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "description": "Embedded Unity C# LSP server for Codely, no remote LSP download required.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "minify:dist": "node scripts/minify-dist.mjs",
+    "start": "node dist/server.js",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test dist/smoke.test.js",
+    "package": "bash scripts/package-extension.sh",
+    "package:slim": "bash scripts/package-extension.sh --no-deps",
+    "package:runtime": "bash scripts/package-extension.sh --runtime-worker"
+  },
+  "dependencies": {
+    "vscode-jsonrpc": "^8.2.1",
+    "vscode-languageserver-protocol": "^3.17.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.6.1",
+    "esbuild": "^0.25.12",
+    "typescript": "^5.9.3"
+  }
+}
