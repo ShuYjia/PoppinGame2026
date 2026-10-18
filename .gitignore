@@ -76,3 +76,6 @@ crashlytics-build.properties
 
 # WorkBuddy project data (local-only, not for repo)
 .workbuddy/
+
+# Unity 编辑器插件（Codely）运行时状态：心跳/序号持续变更，不入库
+.com-unity-codely.json
