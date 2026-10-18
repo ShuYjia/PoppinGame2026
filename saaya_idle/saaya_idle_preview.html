@@ -1,0 +1,264 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>saaya · 像素待机动画预览</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#181b22; --panel2:#1f232c; --line:#2b3040;
+    --fg:#e8eaf0; --dim:#98a0b3; --accent:#e79cbb; --accent2:#ffda96;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;}
+  .wrap{max-width:1180px;margin:0 auto;padding:26px 22px 60px}
+  h1{font-size:19px;margin:0 0 4px;letter-spacing:.3px}
+  h1 span{color:var(--accent)}
+  .sub{color:var(--dim);font-size:12.5px;margin-bottom:20px;line-height:1.7}
+  .sub code{background:var(--panel2);padding:1px 6px;border-radius:4px;color:var(--accent2);font-size:11.5px}
+  .stage{display:grid;grid-template-columns:1fr 300px;gap:18px;align-items:start}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .viewport{position:relative;display:flex;align-items:center;justify-content:center;
+            min-height:460px;border-radius:10px;overflow:hidden}
+  .viewport.checker{background-image:
+      linear-gradient(45deg,#23262e 25%,transparent 25%,transparent 75%,#23262e 75%),
+      linear-gradient(45deg,#23262e 25%,transparent 25%,transparent 75%,#23262e 75%);
+    background-size:16px 16px;background-position:0 0,8px 8px;background-color:#1a1d24}
+  .viewport.dark{background:#12141a}
+  .viewport.light{background:#f2f3f6}
+  .viewport.grid{background-image:linear-gradient(rgba(255,255,255,.055) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.055) 1px,transparent 1px)}
+  canvas{image-rendering:pixelated;image-rendering:crisp-edges;display:block}
+  .stagebox{position:relative}
+  .meta{position:absolute;left:12px;top:12px;font-size:11.5px;color:var(--dim);
+        background:rgba(12,14,18,.72);padding:5px 9px;border-radius:6px;
+        border:1px solid var(--line);font-variant-numeric:tabular-nums}
+  .meta b{color:var(--accent)}
+  .guide{position:absolute;left:0;right:0;height:1px;background:rgba(231,156,187,.5);pointer-events:none}
+  .ghost{position:absolute;inset:0;pointer-events:none;opacity:0;transition:.15s}
+  .ghost.on{opacity:.34;mix-blend-mode:screen}
+  .row{display:flex;align-items:center;gap:10px;margin:9px 0}
+  .row label{font-size:12px;color:var(--dim);min-width:62px}
+  input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:2px;
+      background:var(--panel2);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+      border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #0f1115}
+  .val{font-size:11.5px;color:var(--fg);min-width:52px;text-align:right;
+       font-variant-numeric:tabular-nums}
+  button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+      border-radius:8px;padding:7px 13px;font-size:12.5px;cursor:pointer;transition:.15s}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.on{background:var(--accent);border-color:var(--accent);color:#20131a;font-weight:600}
+  .seg{display:flex;gap:6px;flex-wrap:wrap}
+  .strip{display:flex;gap:6px;margin-top:16px;flex-wrap:wrap}
+  .thumb{width:52px;height:52px;border-radius:7px;border:1px solid var(--line);
+      background:#12141a;cursor:pointer;position:relative;overflow:hidden}
+  .thumb canvas{width:48px;height:48px;margin:2px}
+  .thumb.cur{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .thumb i{position:absolute;right:3px;bottom:1px;font-size:9.5px;font-style:normal;color:var(--dim)}
+  .thumb.cur i{color:var(--accent)}
+  .thumb.blink{background:#1b1520}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:12px}
+  .kv div:nth-child(odd){color:var(--dim)}
+  .kv div:nth-child(even){color:var(--fg);font-variant-numeric:tabular-nums}
+  h2{font-size:13px;margin:0 0 11px;color:var(--accent2);font-weight:600;letter-spacing:.4px}
+  .note{font-size:11.5px;color:var(--dim);line-height:1.75;margin-top:12px}
+  .note em{color:var(--accent);font-style:normal}
+  .pala{display:flex;height:20px;border-radius:5px;overflow:hidden;margin-top:12px}
+  .pala div{flex:1}
+  @media(max-width:900px){.stage{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>saaya · 像素2D 待机动画 <span>Idle</span></h1>
+  <div class="sub">
+    原生像素栅格 <code>44×44</code> · 帧尺寸 <code>48×48</code>（四周留白 2px） ·
+    12 帧循环 @<code>12fps</code> · 呼吸起伏 1px + 第 6/7 帧眨眼 · 脚底中心为枢轴
+  </div>
+
+  <div class="stage">
+    <div class="card">
+      <div class="viewport checker" id="vp">
+        <div class="stagebox">
+          <canvas id="cv"></canvas>
+          <canvas id="gh" class="ghost"></canvas>
+          <div class="guide" id="guide"></div>
+        </div>
+        <div class="meta">帧 <b id="fi">00</b>/12 &nbsp;·&nbsp; <span id="fmode">呼吸 · 睁眼</span>
+          &nbsp;·&nbsp; 位移 <span id="fd">0px</span></div>
+      </div>
+      <div class="row">
+        <label>播放</label>
+        <button id="play" class="on">▶ 播放</button>
+        <button id="prev">◀ 上一帧</button>
+        <button id="next">下一帧 ▶</button>
+        <span class="val" id="fpslab">12 fps</span>
+      </div>
+      <div class="row">
+        <label>速度</label>
+        <input type="range" id="fps" min="2" max="24" value="12">
+        <span class="val" id="fpsv">12</span>
+      </div>
+      <div class="row">
+        <label>缩放</label>
+        <input type="range" id="scale" min="2" max="16" value="8">
+        <span class="val" id="scalev">×8</span>
+      </div>
+      <div class="row">
+        <label>当前帧</label>
+        <input type="range" id="scrub" min="0" max="11" value="0">
+      </div>
+      <div class="row">
+        <label>对照</label>
+        <button id="ghostbtn">叠加基准帧</button>
+        <span class="val" style="min-width:auto;color:var(--dim)">(看 1px 起伏)</span>
+      </div>
+      <div class="row">
+        <label>背景</label>
+        <div class="seg">
+          <button data-bg="checker" class="on">棋盘</button>
+          <button data-bg="dark">深色</button>
+          <button data-bg="light">浅色</button>
+          <button data-bg="grid">网格</button>
+        </div>
+      </div>
+      <div class="strip" id="strip"></div>
+    </div>
+
+    <div class="card">
+      <h2>规格</h2>
+      <div class="kv">
+        <div>原生栅格</div><div>44 × 44 px</div>
+        <div>单帧单元格</div><div>48 × 48 px</div>
+        <div>帧数 / 时长</div><div>12 帧 / 1.000 s</div>
+        <div>循环</div><div>无缝 (loop)</div>
+        <div>枢轴</div><div>脚底中心 / Bottom Center</div>
+        <div>调色板</div><div>17 色</div>
+      </div>
+      <div class="pala" id="pala"></div>
+      <div class="note">
+        <em>呼吸</em>：第 0–3 帧与 10–11 帧为站立基准，第 4–9 帧上身整体下沉 1px（裙摆压到腿上方，脚保持落地不抖）。<br>
+        <em>眨眼</em>：第 6、7 帧闭眼，共 0.167 s。<br>
+        <em>Unity</em>：Sprite Mode = Multiple，按 Grid By Cell Size 48×48 切片；
+        Filter Mode = Point，Compression = None，Pivot = Bottom Center。
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SHEET_SRC = "data:image/png;base64,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";
+const FRAMES = 12, CELL = 48, PAD = 2, BLINK = [6, 7];
+const DY = [0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 0, 0];
+const img = new Image();
+let cur = 0, playing = true, fps = 12, scale = 8, bg = "checker";
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const gh = document.getElementById('gh');
+const gx = gh.getContext('2d');
+const vp = document.getElementById('vp');
+const guide = document.getElementById('guide');
+
+img.onload = () => {
+  ctx.imageSmoothingEnabled = false;
+  layout(); buildStrip(); buildPalette(); loop(performance.now());
+};
+img.src = SHEET_SRC;
+
+function draw() {
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.drawImage(img, cur * CELL, 0, CELL, CELL, 0, 0, cv.width, cv.height);
+  gx.clearRect(0, 0, gh.width, gh.height);
+  gx.drawImage(img, 0, 0, CELL, CELL, 0, 0, gh.width, gh.height);
+}
+
+function layout() {
+  cv.width = CELL * scale;
+  cv.height = CELL * scale;
+  cv.style.width = CELL * scale + 'px';
+  cv.style.height = CELL * scale + 'px';
+  gh.width = cv.width; gh.height = cv.height;
+  gh.style.width = cv.style.width; gh.style.height = cv.style.height;
+  guide.style.bottom = (PAD * scale) + 'px';
+  vp.style.minHeight = Math.max(460, CELL * scale + 40) + 'px';
+  draw();
+}
+
+function buildStrip() {
+  const wrap = document.getElementById('strip');
+  wrap.innerHTML = '';
+  for (let i = 0; i < FRAMES; i++) {
+    const d = document.createElement('div');
+    d.className = 'thumb' + (BLINK.includes(i) ? ' blink' : '');
+    d.innerHTML = '<canvas width="48" height="48"></canvas><i>' + String(i).padStart(2, '0') + '</i>';
+    const c = d.querySelector('canvas');
+    const cx = c.getContext('2d');
+    cx.imageSmoothingEnabled = false;
+    cx.drawImage(img, i * CELL, 0, CELL, CELL, 0, 0, 48, 48);
+    d.onclick = () => { cur = i; playing = false; sync(); };
+    wrap.appendChild(d);
+  }
+  markStrip();
+}
+function markStrip() {
+  [...document.querySelectorAll('.thumb')].forEach((d, i) => d.classList.toggle('cur', i === cur));
+}
+function buildPalette() {
+  const hex = ["#ca949c", "#8b644e", "#f2d2cf", "#d2a494", "#e0b281", "#c3906c", "#ffda96", "#e89c58", "#34384c", "#010101", "#a26e49", "#fffefe", "#391b16", "#634647", "#235a90", "#cde8ff", "#1c334d"];
+  document.getElementById('pala').innerHTML = hex.map(h => '<div style="background:' + h + '"></div>').join('');
+}
+
+function sync() {
+  cur = (cur + FRAMES) % FRAMES;
+  document.getElementById('fi').textContent = String(cur).padStart(2, '0');
+  document.getElementById('fmode').textContent = BLINK.includes(cur) ? '闭眼眨眼' : '呼吸 · 睁眼';
+  document.getElementById('fd').textContent = (DY[cur] ? '+1' : '0') + 'px';
+  document.getElementById('scrub').value = cur;
+  draw(); markStrip();
+}
+
+let acc = 0, last = 0;
+function loop(t) {
+  requestAnimationFrame(loop);
+  if (!last) { last = t; return; }
+  const dt = t - last; last = t;
+  if (!playing) return;
+  acc += dt;
+  const step = 1000 / fps;
+  while (acc >= step) { acc -= step; cur = (cur + 1) % FRAMES; sync(); }
+}
+
+document.getElementById('play').onclick = e => {
+  playing = !playing; e.target.classList.toggle('on', playing);
+  e.target.textContent = playing ? '▶ 播放' : '❚❚ 暂停';
+};
+document.getElementById('prev').onclick = () => { playing = false; document.getElementById('play').classList.remove('on'); document.getElementById('play').textContent = '▶ 播放'; cur--; sync(); };
+document.getElementById('next').onclick = () => { playing = false; document.getElementById('play').classList.remove('on'); document.getElementById('play').textContent = '▶ 播放'; cur++; sync(); };
+document.getElementById('fps').oninput = e => { fps = +e.target.value; document.getElementById('fpsv').textContent = fps; document.getElementById('fpslab').textContent = fps + ' fps'; };
+document.getElementById('scale').oninput = e => {
+  scale = +e.target.value; document.getElementById('scalev').textContent = '×' + scale;
+  layout();
+};
+document.getElementById('scrub').oninput = e => { playing = false; cur = +e.target.value; sync(); };
+document.getElementById('ghostbtn').onclick = e => {
+  const on = gh.classList.toggle('on');
+  e.target.classList.toggle('on', on);
+  e.target.textContent = on ? '关闭基准帧' : '叠加基准帧';
+};
+document.querySelectorAll('[data-bg]').forEach(b => b.onclick = () => {
+  bg = b.dataset.bg;
+  vp.className = 'viewport ' + bg;
+  document.querySelectorAll('[data-bg]').forEach(x => x.classList.toggle('on', x === b));
+});
+window.addEventListener('keydown', e => {
+  if (e.key === ' ') { e.preventDefault(); document.getElementById('play').click(); }
+  if (e.key === 'ArrowRight') document.getElementById('next').click();
+  if (e.key === 'ArrowLeft') document.getElementById('prev').click();
+});
+</script>
+</body>
+</html>

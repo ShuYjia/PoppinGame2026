@@ -1,10 +1,10 @@
 {
-  "unity_port": -1,
-  "stream_port": 56773,
+  "unity_port": 58812,
+  "stream_port": 63330,
   "created_date": "2026-08-04T16:05:42.761Z",
   "project_path": "D:/UnityProject/Poppin/Assets",
   "reloading": false,
-  "reason": "unity_quit",
-  "seq": 3726,
-  "last_heartbeat": "2026-09-06T07:40:59.988Z"
+  "reason": "ready",
+  "seq": 65234,
+  "last_heartbeat": "2026-10-18T17:33:20.672Z"
 }
