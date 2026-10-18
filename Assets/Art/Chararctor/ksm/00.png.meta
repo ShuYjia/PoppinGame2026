@@ -131,7 +131,7 @@ TextureImporter:
       edges: []
       weights: []
     - serializedVersion: 2
-      name: jumpStar
+      name: jumpStart
       rect:
         serializedVersion: 2
         x: 64
@@ -152,7 +152,7 @@ TextureImporter:
       edges: []
       weights: []
     - serializedVersion: 2
-      name: jumpStar1
+      name: jumpStart1
       rect:
         serializedVersion: 2
         x: 128
@@ -341,7 +341,7 @@ TextureImporter:
       edges: []
       weights: []
     - serializedVersion: 2
-      name: 00_11
+      name: attack0
       rect:
         serializedVersion: 2
         x: 320
@@ -362,7 +362,7 @@ TextureImporter:
       edges: []
       weights: []
     - serializedVersion: 2
-      name: 00_12
+      name: attack1
       rect:
         serializedVersion: 2
         x: 0
@@ -383,7 +383,7 @@ TextureImporter:
       edges: []
       weights: []
     - serializedVersion: 2
-      name: 00_13
+      name: attack2
       rect:
         serializedVersion: 2
         x: 64
@@ -404,7 +404,7 @@ TextureImporter:
       edges: []
       weights: []
     - serializedVersion: 2
-      name: 00_14
+      name: attack3
       rect:
         serializedVersion: 2
         x: 128
@@ -425,7 +425,7 @@ TextureImporter:
       edges: []
       weights: []
     - serializedVersion: 2
-      name: 00_15
+      name: attack4
       rect:
         serializedVersion: 2
         x: 192
@@ -750,11 +750,6 @@ TextureImporter:
     weights: []
     secondaryTextures: []
     nameFileIdTable:
-      00_11: 751155579
-      00_12: -2134345077
-      00_13: 50011309
-      00_14: 510928198
-      00_15: -1449155559
       00_16walk: -987688764
       00_17: -1947865168
       00_18: -1044153015
@@ -770,10 +765,15 @@ TextureImporter:
       JumpHighest: -130211560
       JumpHighest1: 1486373797
       JumpHighest2: 893241994
+      attack0: 751155579
+      attack1: -2134345077
+      attack2: 50011309
+      attack3: 510928198
+      attack4: -1449155559
       idle: -907689601
       jumpRise: -356515642
-      jumpStar: 1726482721
-      jumpStar1: 856612631
+      jumpStart: 1726482721
+      jumpStart1: 856612631
       run: -46370694
       run1: 207217509
       run2: -69448428

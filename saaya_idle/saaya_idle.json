@@ -1,0 +1,80 @@
+{
+  "name": "saaya_idle",
+  "source": "saaya.png",
+  "native_grid": [
+    44,
+    44
+  ],
+  "frame_size": [
+    48,
+    48
+  ],
+  "padding": 2,
+  "frame_count": 12,
+  "fps": 12,
+  "loop_duration_sec": 1.0,
+  "layouts": {
+    "strip": {
+      "file": "saaya_idle_sheet.png",
+      "cols": 12,
+      "rows": 1
+    },
+    "grid": {
+      "file": "saaya_idle_grid.png",
+      "cols": 4,
+      "rows": 3
+    }
+  },
+  "blink_frames": [
+    6,
+    7
+  ],
+  "motion": {
+    "body_vertical_offset_px": [
+      0,
+      0,
+      0,
+      0,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      0,
+      0
+    ],
+    "legs": "static (planted)"
+  },
+  "pivot": {
+    "x": 24.0,
+    "y": 46,
+    "note": "脚底中心，向上为 -y"
+  },
+  "unity_recommended": {
+    "sprite_mode": "Multiple",
+    "pixels_per_unit": 48,
+    "filter_mode": "Point (no filter)",
+    "compression": "None",
+    "pivot": "Bottom Center"
+  },
+  "palette": [
+    "#ca949c",
+    "#8b644e",
+    "#f2d2cf",
+    "#d2a494",
+    "#e0b281",
+    "#c3906c",
+    "#ffda96",
+    "#e89c58",
+    "#34384c",
+    "#010101",
+    "#a26e49",
+    "#fffefe",
+    "#391b16",
+    "#634647",
+    "#235a90",
+    "#cde8ff",
+    "#1c334d"
+  ]
+}

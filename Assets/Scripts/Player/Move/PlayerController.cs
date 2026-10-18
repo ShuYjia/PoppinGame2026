@@ -3,28 +3,41 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 
 /// <summary>
-/// FirstLevel 的 2D 平台角色控制器。
+/// FirstLevel 的 2D 平台角色控制器（只负责角色自己的规则与运动）。
 /// 键位：A/D 或 ←/→ 移动（键盘默认奔跑），Ctrl 走路，S/↓ 或 C 蹲下，Space 跳跃，Shift 闪避。
-/// 手柄：左摇杆移动（推动幅度决定速度，默认走路），左肩键奔跑，右肩键闪避，西键（方块）蹲下，南键跳跃。
+/// 手柄：左摇杆移动（推动幅度线性决定速度，推满即奔跑），右肩键闪避，西键（方块）蹲下，南键跳跃。
+///
+/// 本组件与两个协作组件挂在同一个 GameObject 上：
+/// - <see cref="PlayerGroundSensor"/>：物理检测（脚底薄盒探测、区域遮挡），不含规则状态。
+/// - <see cref="PlayerAnimatorView"/>：Animator 参数写入、精灵翻转、闪避特效镜像。
 ///
 /// 设计要点：
 /// 1. 输入在 Update 中采样，物理在 FixedUpdate 中执行，两者通过“跳跃缓冲”衔接，
 ///    因此 FixedUpdate 与 Update 不同步时也不会丢输入。
-/// 2. 地面检测使用贴合脚底的薄盒，配合“土狼时间”和“起跳后锁定”，
+/// 2. 地面检测使用贴合脚底的薄盒（几何计算在 PlayerGroundSensor），配合“土狼时间”和“起跳后锁定”，
 ///    既不会悬空误判，也不会一帧内连跳。
-/// 3. 起跳速度由跳跃高度和当前重力反推，改重力后不需要重新调参。
-/// 4. 移动速度只有走 / 跑两档：键盘默认奔跑、按住 Ctrl 降为走路；手柄默认走路、
-///    左肩键奔跑。摇杆推动幅度在档位内连续缩放（死区之外线性映射）。
+/// 3. 起跳速度由跳跃高度和当前重力反推，改重力后不需要重新调参；
+///    riseGravityMultiplier 经调校使 v0 ≥ 13，对齐 ksm.controller 空中混合树的
+///    JumpStart 阈值（v0 = √(2·g·rise·jumpHeight)，下落仍由 fallGravityMultiplier 主导）。
+///    jumpHeight 是理想连续高度：固定步长（0.02s）积分会让实测顶点低约 v0·dt/2，
+///    已按 rise=3.58 对应的 v0 做补偿（2.90 → 实测顶点 ≈2.76）。
+/// 4. 移动速度分为走 / 跑两档（speed=5 / runSpeed=8）：键盘默认奔跑、按住 Ctrl
+///    降为走路；手柄左摇杆推动幅度在 0 ~ 奔跑速度之间线性映射（死区之外），
+///    推满即为奔跑，轻推可慢速微调。走 / 跑状态按目标速度 > 6 判定，与动画阈值一致。
 /// 5. 蹲下（接地）时不能主动水平移动，但可被场景机关 / 敌人推动，且可以直接起跳；
 ///    在空中新按下蹲下键会锁存一次“下潜”：强制高速下落直至落地并转入蹲下，
 ///    期间保留空中左右操控、禁止起跳。
-/// 6. 动画由 ksm.controller 驱动：代码只把水平速度写进 Animator 的 Speed 参数，
-///    由 idle / walk / run 的条件转换自行切换；空中、蹲下、下潜暂不驱动参数
-///    （保持落地前最后播放的状态），等对应动画片段补全后再接入。
+/// 6. 动画由 ksm.controller 驱动：水平速度写 Speed，竖向速度写 velocityY（空中混合树），
+///    接地状态写 isGround；参数写入集中在 PlayerAnimatorView。
 /// 7. 闪避（Shift / 手柄右肩键）是一次固定时长、固定速度的水平冲刺：触发 Animator 的
 ///    Dodge 触发器进入 sprint 片段，该片段同时驱动子物体 "Sprite Mask/111_export-export"
 ///    的激活与后滑特效；冲刺期间锁定水平速度并暂停常规动画参数，结束后进入冷却。
-///    冲刺距离 ≈ dodgeSpeed × dodgeDuration，两者均可在 Inspector 中调整。
+///    冲刺距离 ≈ dodgeSpeed × dodgeDuration，两者均可在 Inspector 中调整；dodgeDuration
+///    刻意短于 sprint 片段长度，冲刺结束后角色在冲刺姿势中惯性滑行至停止、片段照常播完。
+///    玩家本身只用 SpriteRenderer.flipX 翻转、不会镜像子物体，因此向左冲刺时会：把特效
+///    根物体（同时是 SpriteMask 遮罩窗口）镜像到玩家左侧、用 flipX 翻转特效贴图、并在
+///    LateUpdate（晚于动画写入）把特效子物体的水平位移取反，使特效整体镜像到另一侧，
+///    保证特效始终出现在冲刺方向的后方（实现在 PlayerAnimatorView）。
 ///    无敌帧尚未实装——待受伤系统实现时，在 IsDodging 为真期间屏蔽伤害（已预留）。
 /// </summary>
 [RequireComponent(typeof(Rigidbody2D))]
@@ -47,25 +60,23 @@ public class PlayerController : MonoBehaviour
     [Tooltip("留空时自动创建默认输入资产。")]
     public PlayerInputControl inputControl;
 
-    // ─────────────────────────────── 动画 ───────────────────────────────
+    // ───────────────────────────── 协作组件 ─────────────────────────────
 
-    [Header("动画")]
-    [Tooltip("角色的 Animator。留空时自动从本物体获取（FirstLevel 的 Player 已挂 ksm.controller）。")]
+    [Header("协作组件")]
+    [Tooltip("物理检测组件（脚底探测 / 区域遮挡），与控制器挂在同一个 GameObject 上。")]
     [SerializeField]
-    private Animator animator;
+    private PlayerGroundSensor groundSensor;
 
-    /// <summary>Animator 的 Speed 参数哈希，避免每帧字符串查找。</summary>
-    private static readonly int SpeedParam = Animator.StringToHash("Speed");
-
-    /// <summary>Animator 的 Dodge 触发器哈希（ksm.controller 中新增的参数）。</summary>
-    private static readonly int DodgeParam = Animator.StringToHash("Dodge");
+    [Tooltip("动画控制组件（Animator 参数 / 精灵翻转 / 闪避特效），与控制器挂在同一个 GameObject 上。")]
+    [SerializeField]
+    private PlayerAnimatorView animatorView;
 
     // ─────────────────────────────── 移动 ───────────────────────────────
 
     [Header("移动")]
-    [Tooltip("走路速度。保留 speed 字段名以兼容 FirstLevel 场景里的既有数据。键盘按住 Ctrl 或手柄默认移动时使用。")]
+    [Tooltip("走路速度。保留 speed 字段名以兼容 FirstLevel 场景里的既有数据。键盘按住 Ctrl 时使用；手柄的移动速度由摇杆幅度连续映射（幅度 × runSpeed）决定，无独立档位。")]
     public float speed = 5f;
-    [Tooltip("奔跑速度（键盘默认移动或手柄左肩键；Shift 已改定为闪避键）。")]
+    [Tooltip("奔跑速度。键盘默认移动即达到本速度；手柄摇杆推满（幅度 1）时达到本速度。")]
     public float runSpeed = 8f;
     [Tooltip("在空中按下蹲下键触发的下潜速度（单位/秒），落地后转入蹲下。")]
     public float crouchDiveSpeed = 20f;
@@ -86,8 +97,8 @@ public class PlayerController : MonoBehaviour
     // ─────────────────────────────── 跳跃 ───────────────────────────────
 
     [Header("跳跃")]
-    [Tooltip("起跳高度（世界单位）。起跳速度按当前重力自动换算，改重力后无需重新调参。")]
-    public float jumpHeight = 3.2f;
+    [Tooltip("起跳高度（世界单位，理想连续高度）。起跳速度按当前重力自动换算，改重力后无需重新调参。注意：固定步长（0.02s）积分会让实测顶点低约 v0·dt/2（当前参数下 ≈0.14）；当前值 2.90 对应实测顶点 ≈2.76。")]
+    public float jumpHeight = 2.9f;
     [Tooltip("起跳速度的硬编码覆盖值：> 0 时忽略 jumpHeight。正常流程请只调 jumpHeight。")]
     public float jumpVelocityOverride = 0f;
     [Range(0f, 1f)]
@@ -99,23 +110,14 @@ public class PlayerController : MonoBehaviour
     public float jumpBufferTime = 0.12f;
     [Tooltip("下落时的重力倍率，让下落更干脆。")]
     public float fallGravityMultiplier = 1.6f;
-    [Tooltip("上升时的重力倍率。")]
-    public float riseGravityMultiplier = 1f;
+    [Tooltip("上升时的重力倍率。当前值经调校：使起跳初速度 ≥ ksm.controller 空中混合树的 JumpStart 阈值 13（v0 = √(2·g·rise·jumpHeight)）。")]
+    public float riseGravityMultiplier = 3.58f;
     [Tooltip("最大下落速度（单位/秒），避免高速穿模。<= 0 表示不限制。")]
     public float maxFallSpeed = 25f;
     [Tooltip("起跳后强制屏蔽落地判定的时长（秒），杜绝同一次起跳被判定成连跳。")]
     public float groundLockAfterJump = 0.08f;
-
-    // ───────────────────────────── 地面检测 ─────────────────────────────
-
-    [Header("地面检测")]
-    [Tooltip("哪些层算作地面。")]
-    public LayerMask groundLayer = ~0;
-    [Tooltip("脚下探测盒向下延伸的距离（世界单位）。越大越容易判定为“站在地上”。")]
-    public float groundCheckDistance = 0.08f;
-    [Range(0.1f, 1f)]
-    [Tooltip("脚下探测盒宽度占碰撞体宽度的比例。")]
-    public float groundCheckWidthScale = 0.9f;
+    [Tooltip("当前的竖直速度（每帧刷新，供动画 / 调试查看）。")]
+    public float velocityY;
 
     // ─────────────────────────────── 蹲下 ───────────────────────────────
 
@@ -130,16 +132,11 @@ public class PlayerController : MonoBehaviour
 
     [Header("闪避")]
     [Tooltip("闪避的水平速度（单位/秒）。冲刺距离 ≈ 本值 × 闪避时长。")]
-    public float dodgeSpeed = 12f;
-    [Tooltip("闪避持续时间（秒）。与 ksm.controller 的 sprint 片段长度（0.4667 秒）对齐；改动会同时影响冲刺距离与动画时长。")]
-    public float dodgeDuration = 0.4667f;
+    public float dodgeSpeed = 22.4f;
+    [Tooltip("闪避持续时间（秒），只锁定时长内的水平速度。刻意短于 ksm.controller 的 sprint 片段长度：冲刺结束后角色会在冲刺姿势中惯性滑行至停止，sprint 片段照常播完。")]
+    public float dodgeDuration = 0.2f;
     [Tooltip("闪避结束后的冷却时间（秒），冷却期间不能再次闪避。")]
     public float dodgeCooldown = 0.6f;
-
-    [Header("调试")]
-    [SerializeField]
-    [Tooltip("在 Scene 视图里画出脚下的地面探测盒。")]
-    private bool drawGizmos = true;
 
     // ───────────────────────────── 运行时状态 ─────────────────────────────
 
@@ -199,15 +196,13 @@ public class PlayerController : MonoBehaviour
 
     // ─────────────────────────────── 内部字段 ───────────────────────────────
 
-    private const float ProbeSlack = 0.01f;               // 探测盒越过脚底线的余量
+    private const float ProbeSlack = 0.01f;               // 落地判定允许的微小向上速度
     private const float GroundedVelocityTolerance = 0.5f; // 向上速度超过该值一律视为离地
     private const float DefaultGravity = 9.81f;           // Physics2D.gravity 为 0 时的兜底
-    private const int MaxProbeResults = 8;
 
     private Collider2D col;
     private CapsuleCollider2D capsule;
     private BoxCollider2D box;
-    private SpriteRenderer spriteRenderer;
 
     private Vector2 standingSize;
     private Vector2 standingOffset;
@@ -216,7 +211,6 @@ public class PlayerController : MonoBehaviour
 
     private float baseGravityScale = 1f;
     private float appliedGravityScale;
-    private bool sprintInput;
     private bool crouchInput;
     private bool walkInput;
     private bool crouchInputPrev;
@@ -232,7 +226,6 @@ public class PlayerController : MonoBehaviour
     private float groundLockTimer;
     private bool jumpCutPending;
     private bool isJumping;
-    private Collider2D[] probeBuffer;
 
     // ─────────────────────────────── 生命周期 ───────────────────────────────
 
@@ -243,9 +236,6 @@ public class PlayerController : MonoBehaviour
 
         rb = GetComponent<Rigidbody2D>();
         col = GetComponent<Collider2D>();
-        spriteRenderer = GetComponent<SpriteRenderer>();
-        if (animator == null)
-            animator = GetComponent<Animator>();
 
         if (rb == null)
         {
@@ -261,13 +251,24 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        if (groundSensor == null)
+            groundSensor = GetComponent<PlayerGroundSensor>();
+        if (animatorView == null)
+            animatorView = GetComponent<PlayerAnimatorView>();
+
+        if (groundSensor == null || animatorView == null)
+        {
+            Debug.LogError("PlayerController 需要同物体上的 PlayerGroundSensor 与 PlayerAnimatorView。", this);
+            enabled = false;
+            return;
+        }
+
         capsule = col as CapsuleCollider2D;
         box = col as BoxCollider2D;
 
         CaptureStandingShape();
         baseGravityScale = rb.gravityScale;
         appliedGravityScale = baseGravityScale;
-        probeBuffer = new Collider2D[MaxProbeResults];
 
         // 降低墙面摩擦，防止跳跃时贴墙滑住。
         if (col.sharedMaterial == null)
@@ -304,8 +305,6 @@ public class PlayerController : MonoBehaviour
             return;
 
         InputDirection = inputControl.GamePlay.Move.ReadValue<Vector2>();
-        // 奔跑键仅剩手柄左肩键：键盘默认即为奔跑，Shift 已改定为闪避键。
-        sprintInput = IsSprintPressed();
         // 方向键向下或 C 蹲下；Ctrl 是走路键，不再触发蹲下。
         crouchInput = InputDirection.y < -0.5f || IsCrouchPressed();
         walkInput = IsWalkPressed();
@@ -317,7 +316,7 @@ public class PlayerController : MonoBehaviour
         dodgeInputPrev = dodgeInput;
 
         // 记录本次移动输入来自键盘还是手柄：键盘没有模拟量，默认即为奔跑（Ctrl 降为走路）；
-        // 手柄默认走路，左肩键奔跑。
+        // 手柄的移动速度完全由摇杆幅度线性映射决定（0 ~ 奔跑速度），无独立档位。
         InputControl moveControl = inputControl.GamePlay.Move.activeControl;
         if (moveControl != null && moveControl.device != null)
             usingKeyboard = moveControl.device is Keyboard;
@@ -340,6 +339,7 @@ public class PlayerController : MonoBehaviour
         SetCrouching(crouchInput && IsGrounded && !IsDodging);
         UpdateFacing();
         UpdateAnimation();
+
     }
 
     private void FixedUpdate()
@@ -365,7 +365,7 @@ public class PlayerController : MonoBehaviour
         }
 
         bool wasGrounded = IsGrounded;
-        bool groundedNow = ProbeGround();
+        bool groundedNow = ProbeGroundedNow();
 
         // 下潜锁存到落地即解除。
         if (diveLatch && groundedNow)
@@ -414,14 +414,15 @@ public class PlayerController : MonoBehaviour
         float inputX = Mathf.Abs(InputDirection.x) < inputDeadZone ? 0f : InputDirection.x;
         bool hasInput = Mathf.Abs(inputX) > Mathf.Epsilon;
 
-        // 蹲下时不能奔跑也不能走路；无输入时也不算奔跑，便于动画回到 Idle。
-        // 键盘默认奔跑、按住 Ctrl 降为走路；手柄默认走路、左肩键奔跑。
-        IsRunning = hasInput && !IsCrouching && !walkInput && (usingKeyboard || sprintInput);
-        IsWalking = hasInput && !IsCrouching && !IsRunning;
-
-        // 蹲下时目标速度为 0：用 deceleration 缓停而不是硬置零，机关 / 敌人仍然推得动。
-        float targetSpeed = IsCrouching ? 0f : (IsRunning ? runSpeed : speed);
+        // 目标速度：蹲下 = 0（缓停，保证机关 / 敌人推得动）；
+        // 键盘默认奔跑（runSpeed）、按住 Ctrl 降为走路（speed）两档；
+        // 手柄摇杆幅度在 0 ~ runSpeed 之间线性映射，推满即为奔跑。
+        float targetSpeed = IsCrouching ? 0f : (usingKeyboard && walkInput ? speed : runSpeed);
         float targetVelocity = inputX * targetSpeed;
+
+        // 走 / 跑状态与动画阈值一致：目标速度超过 6（约为摇杆 75% 幅度）记为奔跑。
+        IsRunning = hasInput && !IsCrouching && Mathf.Abs(targetVelocity) > 6f;
+        IsWalking = hasInput && !IsCrouching && !IsRunning;
 
         float rate = (hasInput && !IsCrouching) ? acceleration : deceleration;
         if (!IsGrounded)
@@ -437,22 +438,20 @@ public class PlayerController : MonoBehaviour
     // ─────────────────────────────── 动画 ───────────────────────────────
 
     /// <summary>
-    /// 把水平速度写进 Animator 的 Speed 参数，由 ksm.controller 的条件转换
-    /// 自行切换 idle / walk / run（阈值 0.1 / 6，夹在走速 5 与跑速 8 之间）。
-    /// 空中、蹲下、下潜不驱动参数：保持落地前最后播放的状态；
-    /// 闪避期间同样冻结——此时 Animator 由 Dodge 触发器切入 sprint 片段，
-    /// Speed 不再参与该片段的状态转换。
+    /// 把速度与接地状态交给动画组件。竖直速度与接地状态每帧都写（空中混合树依赖它们）；
+    /// Speed 只在接地且未蹲下 / 未下潜 / 未闪避时刷新，其余情况保持上一帧的值，
+    /// 让 idle / walk / run 维持在当前档位。
     /// </summary>
     private void UpdateAnimation()
     {
-        if (animator == null || rb == null)
+        if (animatorView == null || rb == null)
             return;
+
+        velocityY = rb.velocity.y;
 
         // 空中、蹲下、下潜、闪避均不驱动 Speed：分别保持落地前最后状态或播放冲刺片段。
-        if (!IsGrounded || IsCrouching || diveLatch || IsDodging)
-            return;
-
-        animator.SetFloat(SpeedParam, Mathf.Abs(rb.velocity.x));
+        bool driveLocomotion = IsGrounded && !IsCrouching && !diveLatch && !IsDodging;
+        animatorView.ApplyMotion(rb.velocity.x, velocityY, IsGrounded, driveLocomotion);
     }
 
     // ─────────────────────────────── 闪避 ───────────────────────────────
@@ -483,15 +482,19 @@ public class PlayerController : MonoBehaviour
         if (dodgeDirection != FacingDirection)
         {
             FacingDirection = dodgeDirection;
-            if (spriteRenderer != null)
-                spriteRenderer.flipX = dodgeDirection < 0;
+            if (animatorView != null)
+                animatorView.SetFacing(dodgeDirection);
         }
+
+        // 特效镜像必须在片段写入位移之前设置（详见 PlayerAnimatorView）。
+        if (animatorView != null)
+            animatorView.SetDodgeDirection(dodgeDirection);
 
         IsDodging = true;
         dodgeTimer = dodgeDuration;
 
-        if (animator != null)
-            animator.SetTrigger(DodgeParam);
+        if (animatorView != null)
+            animatorView.TriggerDodge();
 
         Dodged?.Invoke();
     }
@@ -511,6 +514,7 @@ public class PlayerController : MonoBehaviour
         isJumping = true;
 
         rb.velocity = new Vector2(rb.velocity.x, GetJumpVelocity());
+
         Jumped?.Invoke();
     }
 
@@ -528,13 +532,17 @@ public class PlayerController : MonoBehaviour
         Jump();
     }
 
-    /// <summary>由跳跃高度反推起跳速度；jumpVelocityOverride > 0 时直接使用该值。</summary>
+    /// <summary>
+    /// 由跳跃高度反推起跳速度；jumpVelocityOverride > 0 时直接使用该值。
+    /// 上升阶段实际生效的重力是「基础重力 × riseGravityMultiplier」，
+    /// 因此按这个值反推，否则调大上升重力后实际跳跃高度会低于 jumpHeight。
+    /// </summary>
     private float GetJumpVelocity()
     {
         if (jumpVelocityOverride > 0f)
             return jumpVelocityOverride;
 
-        float gravity = Mathf.Abs(Physics2D.gravity.y * baseGravityScale);
+        float gravity = Mathf.Abs(Physics2D.gravity.y * baseGravityScale) * Mathf.Max(0.01f, riseGravityMultiplier);
         if (gravity < 0.01f)
             gravity = DefaultGravity;
 
@@ -580,12 +588,12 @@ public class PlayerController : MonoBehaviour
     // ───────────────────────────── 地面检测 ─────────────────────────────
 
     /// <summary>
-    /// 用贴住脚底的一条薄盒判定是否站在地面上。
-    /// 探测距离只有 groundCheckDistance，所以不会出现“离地一段距离仍算落地”导致的连跳。
+    /// 判定本物理帧是否接地：几何探测交给 PlayerGroundSensor，
+    /// 「什么算接地」的规则留在这里——刚起跳的锁定时间内、以及正在上升时都不算落地。
     /// </summary>
-    private bool ProbeGround()
+    private bool ProbeGroundedNow()
     {
-        if (col == null || rb == null)
+        if (groundSensor == null || rb == null)
             return false;
 
         // 刚起跳的几帧强制离地，彻底杜绝同一次起跳被重复判定。
@@ -596,44 +604,7 @@ public class PlayerController : MonoBehaviour
         if (rb.velocity.y > GroundedVelocityTolerance)
             return false;
 
-        Bounds bounds = col.bounds;
-        float reach = Mathf.Max(0.005f, groundCheckDistance);
-        Vector2 size = new Vector2(Mathf.Max(0.01f, bounds.size.x * groundCheckWidthScale), reach + ProbeSlack);
-        Vector2 center = new Vector2(bounds.center.x, bounds.min.y - reach * 0.5f + ProbeSlack * 0.5f);
-
-        return HasForeignCollider(center, size);
-    }
-
-    /// <summary>区域内是否命中“不属于自己”的碰撞体。</summary>
-    private bool HasForeignCollider(Vector2 center, Vector2 size)
-    {
-        if (probeBuffer == null)
-            probeBuffer = new Collider2D[MaxProbeResults];
-
-        int count = Physics2D.OverlapBox(center, size, 0f, BuildGroundFilter(), probeBuffer);
-        for (int i = 0; i < count; i++)
-        {
-            Collider2D hit = probeBuffer[i];
-            if (hit == null || hit.isTrigger || hit == col)
-                continue;
-            // 自己以及挂在同一个刚体上的子碰撞体都不算障碍。
-            if (rb != null && hit.attachedRigidbody == rb)
-                continue;
-            if (hit.transform == transform || hit.transform.IsChildOf(transform))
-                continue;
-            return true;
-        }
-
-        return false;
-    }
-
-    private ContactFilter2D BuildGroundFilter()
-    {
-        ContactFilter2D filter = new ContactFilter2D();
-        filter.useTriggers = false;
-        filter.useLayerMask = true;
-        filter.layerMask = groundLayer;
-        return filter;
+        return groundSensor.ProbeGround();
     }
 
     // ─────────────────────────────── 蹲下 ───────────────────────────────
@@ -683,7 +654,10 @@ public class PlayerController : MonoBehaviour
         Vector2 size = new Vector2(Mathf.Max(0.01f, current.size.x * 0.9f), extraHeight + padding * 2f);
         Vector2 center = new Vector2(current.center.x, current.max.y + extraHeight * 0.5f);
 
-        return !HasForeignCollider(center, size);
+        if (groundSensor == null)
+            return true;
+
+        return !groundSensor.IsAreaBlocked(center, size);
     }
 
     private void CaptureStandingShape(bool warnIfUnsupported = true)
@@ -757,29 +731,12 @@ public class PlayerController : MonoBehaviour
 
         FacingDirection = direction;
 
-        // 优先翻转 SpriteRenderer：这样碰撞体的 X 偏移不会被一起镜像。
-        if (spriteRenderer != null)
-        {
-            spriteRenderer.flipX = direction < 0;
-            return;
-        }
-
-        Vector3 scale = transform.localScale;
-        float absX = Mathf.Abs(scale.x);
-        if (absX <= 0f)
-            absX = 1f;
-        scale.x = absX * direction;
-        transform.localScale = scale;
+        // 翻转交给动画组件：优先翻 SpriteRenderer，避免碰撞体的 X 偏移被一起镜像。
+        if (animatorView != null)
+            animatorView.SetFacing(direction);
     }
 
     // ─────────────────────────────── 输入读取 ───────────────────────────────
-
-    /// <summary>奔跑键：仅手柄左肩键。键盘默认即为奔跑；Shift 已改定为闪避键。</summary>
-    private bool IsSprintPressed()
-    {
-        Gamepad gamepad = Gamepad.current;
-        return gamepad != null && gamepad.leftShoulder.isPressed;
-    }
 
     /// <summary>闪避键：Shift（键盘）或右肩键（手柄）。</summary>
     private bool IsDodgePressed()
@@ -819,29 +776,9 @@ public class PlayerController : MonoBehaviour
         col = GetComponent<Collider2D>();
         capsule = col as CapsuleCollider2D;
         box = col as BoxCollider2D;
-        spriteRenderer = GetComponent<SpriteRenderer>();
 
         // 没有碰撞体时不刷警告，避免脚本重载时刷屏（Awake 里已有明确报错）。
         if (col != null)
             CaptureStandingShape(false);
-    }
-
-    private void OnDrawGizmosSelected()
-    {
-        if (!drawGizmos)
-            return;
-
-        if (col == null)
-            col = GetComponent<Collider2D>();
-        if (col == null)
-            return;
-
-        Bounds bounds = col.bounds;
-        float reach = Mathf.Max(0.005f, groundCheckDistance);
-        Vector2 size = new Vector2(Mathf.Max(0.01f, bounds.size.x * groundCheckWidthScale), reach + ProbeSlack);
-        Vector2 center = new Vector2(bounds.center.x, bounds.min.y - reach * 0.5f + ProbeSlack * 0.5f);
-
-        Gizmos.color = Application.isPlaying && IsGrounded ? Color.green : Color.yellow;
-        Gizmos.DrawWireCube(center, size);
     }
 }
