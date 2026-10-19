@@ -7,9 +7,11 @@ using UnityEngine;
 /// - Speed(Float)：水平速度绝对值，idle / walk / run 的切换条件（阈值 0.1 起走 / 6 起跑）。
 /// - velocityY(Float)：竖直速度，空中状态「13」的 1D 混合树参数。
 /// - isGround(Bool)：是否接地，false 时 AnyState 进空中混合树，true 时回 JumpGround → idle。
+/// - IsCrouching(Bool)：是否蹲下，true 时 idle/walk/run 进 crouchDown（渐蹲过渡），
+///   播完接 crouchIdle（蹲姿摆动循环）；false 时回 idle。
 ///
-/// velocityY 与 isGround 必须每帧都写：漏写时混合树会停在默认值 velocityY = 0（最高点姿势），
-/// 而 isGround 一直是 false 时角色永远不会从空中状态落回。
+/// velocityY、isGround 与 IsCrouching 必须每帧都写：漏写时混合树会停在默认值 velocityY = 0（最高点姿势），
+/// 而 isGround 一直是 false 时角色永远不会从空中状态落回；IsCrouching 漏写则蹲下动画不触发。
 /// </summary>
 public class PlayerAnimatorView : MonoBehaviour
 {
@@ -34,6 +36,9 @@ public class PlayerAnimatorView : MonoBehaviour
 
     /// <summary>Animator 的 Dodge 触发器哈希（ksm.controller 中新增的参数）。</summary>
     private static readonly int DodgeParam = Animator.StringToHash("Dodge");
+
+    /// <summary>蹲下状态参数哈希（ksm.controller 中新增的参数）：驱动 crouchDown / crouchIdle 两个蹲下状态。</summary>
+    private static readonly int IsCrouchingParam = Animator.StringToHash("IsCrouching");
 
     private const string DodgeEffectRootName = "Sprite Mask";    // 闪避特效根物体（SpriteMask 遮罩窗口 + 特效之父）
     private const string DodgeEffectName = "111_export-export"; // 闪避特效子物体（sprint 片段驱动其激活与位移）
@@ -74,17 +79,19 @@ public class PlayerAnimatorView : MonoBehaviour
     /// <param name="horizontalVelocity">带符号的水平速度，写入 Speed（取绝对值）。</param>
     /// <param name="verticalVelocity">带符号的竖直速度，写入 velocityY（空中混合树）。</param>
     /// <param name="grounded">是否接地，写入 isGround。</param>
+    /// <param name="crouching">是否蹲下，写入 IsCrouching（蹲下动画驱动参数，每帧都写）。</param>
     /// <param name="driveLocomotion">
     /// 是否刷新 Speed：接地且未蹲下 / 未下潜 / 未闪避时为 true；
     /// 为 false 时保持上一帧的 Speed，让 idle / walk / run 维持在当前档位。
     /// </param>
-    public void ApplyMotion(float horizontalVelocity, float verticalVelocity, bool grounded, bool driveLocomotion)
+    public void ApplyMotion(float horizontalVelocity, float verticalVelocity, bool grounded, bool driveLocomotion, bool crouching)
     {
         if (animator == null)
             return;
 
         animator.SetFloat(VerticalVelocityParam, verticalVelocity);
         animator.SetBool(IsGroundParam, grounded);
+        animator.SetBool(IsCrouchingParam, crouching);
 
         if (!driveLocomotion)
             return;
