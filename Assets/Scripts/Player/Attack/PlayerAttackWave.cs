@@ -2,8 +2,8 @@ using UnityEngine;
 
 /// <summary>
 /// 普通攻击的音波：朝给定方向水平飞行，超时或碰到障碍后消失。
-/// 朝向用 SpriteRenderer.flipX 镜像（贴图朝右绘制），不走负缩放——URP 2D 会背面剔除整物体。
-/// 默认驱动 Assets/Art/FX/NorAttack/NormalAttackFx.png 的切片序列帧（音符星星 + 向右扩展的声波），
+/// 朝向用 SpriteRenderer.flipX 镜像（贴图朝左绘制），不走负缩放——URP 2D 会背面剔除整物体。
+/// 默认驱动 Assets/Art/FX/NorAttack/NormalAttackFx.png 的切片序列帧（左侧声波弧 + 右侧音符星星），
 /// 播放一遍后停在最后一帧（非循环），与寿命自然衔接。
 /// 纯表现道具：伤害、命中判定与消耗留待战斗系统实现时在本预制体上扩展
 /// （PlayerController.RequestAttack 即调用入口）。
@@ -56,7 +56,7 @@ public class PlayerAttackWave : MonoBehaviour
         ApplyFrame();
 
         if (spriteRenderer != null)
-            spriteRenderer.flipX = direction < 0;
+            spriteRenderer.flipX = direction > 0;
     }
 
     private void Update()

@@ -97,40 +97,17 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c44544ee784480143a803fee2322f6f8, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  speed: 8
+  speed: 15
   lifetime: 1.2
   hitLayers:
     serializedVersion: 2
     m_Bits: 4294967295
   frames:
-  - {fileID: 1488600638, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: -1118988158, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: -1646368001, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: 2111090208, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: -765406394, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: -51244840, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: -702211409, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: 918689366, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
   - {fileID: -1999264124, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
   - {fileID: 174213636, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
   - {fileID: 1541864474, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
   - {fileID: -1310703592, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
   - {fileID: 1932964307, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
   - {fileID: -1756058856, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: 2071748672, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: -722936652, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: 1590174455, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: 1291285902, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: -713805947, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: 987061795, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: -1906548349, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: -504586959, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: 864060202, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: -647754308, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: 1830454045, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: -209491797, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: -150528843, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: 178405829, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
-  - {fileID: -19954801, guid: 45266894efd56634eb0e9514ee0a9641, type: 3}
   frameRate: 24
   loop: 0
