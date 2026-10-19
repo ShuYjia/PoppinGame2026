@@ -2143,6 +2143,12 @@ MonoBehaviour:
   dodgeSpeed: 20
   dodgeDuration: 0.03
   dodgeCooldown: 0.6
+  attackCooldown: 0.4
+  attackDuration: 0.375
+  attackMoveMultiplier: 0.5
+  attackFallSpeed: 3
+  waveSpawnOffset: 0.3
+  wavePrefab: {fileID: 6212759426798730618, guid: 156781d56eaa3494f846e2d3534dfd49, type: 3}
   rb: {fileID: 0}
 --- !u!50 &782817708
 Rigidbody2D:

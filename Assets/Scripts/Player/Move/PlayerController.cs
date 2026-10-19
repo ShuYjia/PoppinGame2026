@@ -4,8 +4,8 @@ using UnityEngine.InputSystem;
 
 /// <summary>
 /// FirstLevel 的 2D 平台角色控制器（只负责角色自己的规则与运动）。
-/// 键位：A/D 或 ←/→ 移动（键盘默认奔跑），Ctrl 走路，S/↓ 或 C 蹲下，Space 跳跃，Shift 闪避。
-/// 手柄：左摇杆移动（推动幅度线性决定速度，推满即奔跑），右肩键闪避，西键（方块）蹲下，南键跳跃。
+/// 键位：A/D 或 ←/→ 移动（键盘默认奔跑），Ctrl 走路，S/↓ 或 C 蹲下，Space 跳跃，Shift 闪避，J 攻击。
+/// 手柄：左摇杆移动（推动幅度线性决定速度，推满即奔跑），右肩键闪避，西键（方块）蹲下，南键跳跃，北键（△）攻击。
 ///
 /// 本组件与两个协作组件挂在同一个 GameObject 上：
 /// - <see cref="PlayerGroundSensor"/>：物理检测（脚底薄盒探测、区域遮挡），不含规则状态。
@@ -39,6 +39,13 @@ using UnityEngine.InputSystem;
 ///    LateUpdate（晚于动画写入）把特效子物体的水平位移取反，使特效整体镜像到另一侧，
 ///    保证特效始终出现在冲刺方向的后方（实现在 PlayerAnimatorView）。
 ///    无敌帧尚未实装——待受伤系统实现时，在 IsDodging 为真期间屏蔽伤害（已预留）。
+/// 8. 普通攻击（J / 手柄北键 △）：触发 ksm.controller 的 normalAttack 片段，并在角色前方
+///    发射一枚音波（纯表现：飞行、撞墙/超时消失，无伤害无消耗）。攻击效果窗口
+///    （attackDuration）内移动速度按 attackMoveMultiplier 降低（不锁定）。
+///    空中攻击不触发攻击片段——AnyState→空中状态的既有结构会在一帧内把它切回空中姿势，
+///    且残留的触发器会在落地时误触发一次攻击；空中攻击改为纯机械效果：立即由上升切入
+///    下落，并在攻击窗口内把下落速度限制在 attackFallSpeed，到期后恢复正常下落。
+///    伤害 / 命中 / 消耗等战斗数值留待战斗系统实现时接入（音波预制体即扩展点）。
 /// </summary>
 [RequireComponent(typeof(Rigidbody2D))]
 public class PlayerController : MonoBehaviour
@@ -138,6 +145,22 @@ public class PlayerController : MonoBehaviour
     [Tooltip("闪避结束后的冷却时间（秒），冷却期间不能再次闪避。")]
     public float dodgeCooldown = 0.6f;
 
+    // ─────────────────────────────── 攻击 ───────────────────────────────
+
+    [Header("攻击")]
+    [Tooltip("普通攻击冷却（秒）：从按下攻击键起算，冷却期间忽略新的攻击输入。")]
+    public float attackCooldown = 0.4f;
+    [Tooltip("攻击效果窗口（秒）：与 normalAttack 片段长度（0.375s）对齐。窗口内降低移动速度；空中攻击窗口内同时限制下落速度，到期后恢复。")]
+    public float attackDuration = 0.375f;
+    [Tooltip("攻击窗口内的水平速度倍率：降低移动速度但不锁定（0.5 ≈ 奔跑 8 降到 4）。")]
+    public float attackMoveMultiplier = 0.5f;
+    [Tooltip("空中攻击窗口内的最大下落速度（单位/秒）：减缓下落；窗口结束后恢复正常下落。")]
+    public float attackFallSpeed = 3f;
+    [Tooltip("音波生成点相对碰撞体中心的水平偏移（世界单位，朝向前方）。")]
+    public float waveSpawnOffset = 0.3f;
+    [Tooltip("音波预制体（Assets/Scripts/Player/Attack/PlayerAttackWave.prefab）：飞行速度、存活时间、撞击层都在预制体上调。")]
+    public GameObject wavePrefab;
+
     // ───────────────────────────── 运行时状态 ─────────────────────────────
 
     /// <summary>当前帧的原始移动输入。</summary>
@@ -157,6 +180,9 @@ public class PlayerController : MonoBehaviour
 
     /// <summary>是否正在闪避（冲刺中）。供动画 / 将来的受伤系统查询（无敌帧预留位）。</summary>
     public bool IsDodging { get; private set; }
+
+    /// <summary>是否处于攻击效果窗口内（按下攻击键后的 attackDuration 秒）。</summary>
+    public bool IsAttacking => attackTimer > 0f;
 
     /// <summary>1 表示朝右，-1 表示朝左。</summary>
     public int FacingDirection { get; private set; } = 1;
@@ -190,6 +216,9 @@ public class PlayerController : MonoBehaviour
     /// <summary>闪避成功触发瞬间（进入冲刺时）。</summary>
     public event Action Dodged;
 
+    /// <summary>普通攻击触发瞬间（进入冷却并在前方发射音波时）。</summary>
+    public event Action Attacked;
+
     [HideInInspector]
     [Tooltip("自动从本物体获取，无需在 Inspector 里指定。")]
     public Rigidbody2D rb;
@@ -219,6 +248,10 @@ public class PlayerController : MonoBehaviour
     private float dodgeTimer;
     private float dodgeCooldownTimer;
     private int dodgeDirection = 1;
+    private float attackCooldownTimer;
+    private float attackTimer;
+    private bool attackInputPrev;
+    private bool airAttackCutPending;
     private bool usingKeyboard = true;
 
     private float jumpBufferTimer;
@@ -315,6 +348,12 @@ public class PlayerController : MonoBehaviour
             RequestDodge();
         dodgeInputPrev = dodgeInput;
 
+        // 攻击：J（键盘）/ 北面键 △/Y（手柄），边沿触发；冷却中忽略。
+        bool attackInput = IsAttackPressed();
+        if (attackInput && !attackInputPrev)
+            RequestAttack();
+        attackInputPrev = attackInput;
+
         // 记录本次移动输入来自键盘还是手柄：键盘没有模拟量，默认即为奔跑（Ctrl 降为走路）；
         // 手柄的移动速度完全由摇杆幅度线性映射决定（0 ~ 奔跑速度），无独立档位。
         InputControl moveControl = inputControl.GamePlay.Move.activeControl;
@@ -354,6 +393,10 @@ public class PlayerController : MonoBehaviour
             groundLockTimer = Mathf.Max(0f, groundLockTimer - dt);
         if (dodgeCooldownTimer > 0f)
             dodgeCooldownTimer = Mathf.Max(0f, dodgeCooldownTimer - dt);
+        if (attackCooldownTimer > 0f)
+            attackCooldownTimer = Mathf.Max(0f, attackCooldownTimer - dt);
+        if (attackTimer > 0f)
+            attackTimer = Mathf.Max(0f, attackTimer - dt);
         if (IsDodging)
         {
             dodgeTimer -= dt;
@@ -385,10 +428,22 @@ public class PlayerController : MonoBehaviour
 
         IsGrounded = groundedNow;
 
+        // 空中攻击：立即由上升切入下落（无论之前是否在上升），随后在攻击窗口内减缓下落。
+        if (airAttackCutPending)
+        {
+            airAttackCutPending = false;
+            if (!IsGrounded)
+                rb.velocity = new Vector2(rb.velocity.x, Mathf.Min(rb.velocity.y, 0f));
+        }
+
         // 先判定起跳再处理松键截断：这样“同帧按下又松开”的极短点按也能正确变成小跳。
         TryJump();
         ApplyJumpCut();
         ApplyGravity();
+
+        // 攻击窗口内减缓下落速度（下潜优先：下潜是主动高速下坠，不被攻击窗口覆盖）。
+        if (attackTimer > 0f && !diveLatch && !IsGrounded && rb.velocity.y < -attackFallSpeed)
+            rb.velocity = new Vector2(rb.velocity.x, -attackFallSpeed);
 
         // 下潜期间强制高速下落；水平操控保留，由 Move 的空中控制处理。
         if (diveLatch)
@@ -418,6 +473,9 @@ public class PlayerController : MonoBehaviour
         // 键盘默认奔跑（runSpeed）、按住 Ctrl 降为走路（speed）两档；
         // 手柄摇杆幅度在 0 ~ runSpeed 之间线性映射，推满即为奔跑。
         float targetSpeed = IsCrouching ? 0f : (usingKeyboard && walkInput ? speed : runSpeed);
+        // 攻击效果窗口内降低移动速度（不锁定：输入仍然有效，只是目标速度打折）。
+        if (attackTimer > 0f)
+            targetSpeed *= attackMoveMultiplier;
         float targetVelocity = inputX * targetSpeed;
 
         // 走 / 跑状态与动画阈值一致：目标速度超过 6（约为摇杆 75% 幅度）记为奔跑。
@@ -497,6 +555,54 @@ public class PlayerController : MonoBehaviour
             animatorView.TriggerDodge();
 
         Dodged?.Invoke();
+    }
+
+    // ─────────────────────────────── 攻击 ───────────────────────────────
+
+    /// <summary>
+    /// 请求一次普通攻击：冷却结束时生效。地面攻击触发 ksm.controller 的 normalAttack 片段，
+    /// 并在角色前方发射一枚音波；攻击效果窗口（attackDuration）内移动速度降低（不锁定）。
+    /// 空中攻击不触发攻击片段——AnyState→空中状态的既有结构会在一帧内把它切回空中姿势，
+    /// 且残留的触发器会在落地时误触发一次攻击；空中攻击改为纯机械效果：立即由上升切入
+    /// 下落，并在攻击窗口内把下落速度限制在 attackFallSpeed，到期后恢复正常下落。
+    /// 伤害 / 命中 / 消耗等战斗数值留待战斗系统实现时接入（音波预制体即扩展点）。
+    /// 供 Update 的输入采样调用，将来的技能系统也可直接调用。
+    /// </summary>
+    public void RequestAttack()
+    {
+        if (rb == null || attackCooldownTimer > 0f)
+            return;
+
+        attackCooldownTimer = attackCooldown;
+        attackTimer = attackDuration;
+
+        if (!IsGrounded)
+            airAttackCutPending = true;
+
+        // 只有地面攻击播放攻击片段（空中的处理见方法注释）。
+        if (IsGrounded && animatorView != null)
+            animatorView.TriggerAttack();
+
+        SpawnAttackWave();
+
+        Attacked?.Invoke();
+    }
+
+    /// <summary>在碰撞体正前方（朝向前）生成一枚音波，并按当前朝向发射。</summary>
+    private void SpawnAttackWave()
+    {
+        if (wavePrefab == null || col == null)
+            return;
+
+        Bounds bounds = col.bounds;
+        Vector2 spawnPosition = new Vector2(
+            bounds.center.x + FacingDirection * (bounds.extents.x + waveSpawnOffset),
+            bounds.center.y);
+
+        GameObject wave = Instantiate(wavePrefab, spawnPosition, Quaternion.identity);
+        PlayerAttackWave waveComponent = wave.GetComponent<PlayerAttackWave>();
+        if (waveComponent != null)
+            waveComponent.Launch(FacingDirection, transform);
     }
 
     // ─────────────────────────────── 跳跃 ───────────────────────────────
@@ -747,6 +853,17 @@ public class PlayerController : MonoBehaviour
 
         Gamepad gamepad = Gamepad.current;
         return gamepad != null && gamepad.rightShoulder.isPressed;
+    }
+
+    /// <summary>攻击键：J（键盘）或北面键 △/Y（手柄）。</summary>
+    private bool IsAttackPressed()
+    {
+        Keyboard keyboard = Keyboard.current;
+        if (keyboard != null && keyboard.jKey.isPressed)
+            return true;
+
+        Gamepad gamepad = Gamepad.current;
+        return gamepad != null && gamepad.buttonNorth.isPressed;
     }
 
     private bool IsCrouchPressed()

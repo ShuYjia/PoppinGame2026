@@ -7,6 +7,8 @@ using UnityEngine;
 /// - Speed(Float)：水平速度绝对值，idle / walk / run 的切换条件（阈值 0.1 起走 / 6 起跑）。
 /// - velocityY(Float)：竖直速度，空中状态「13」的 1D 混合树参数。
 /// - isGround(Bool)：是否接地，false 时 AnyState 进空中混合树，true 时回 JumpGround → idle。
+/// - Dodge(Trigger)：闪避，AnyState → sprint。
+/// - Attack(Trigger)：普通攻击，AnyState → normalAttack（仅地面攻击触发，见 PlayerController）。
 ///
 /// velocityY 与 isGround 必须每帧都写：漏写时混合树会停在默认值 velocityY = 0（最高点姿势），
 /// 而 isGround 一直是 false 时角色永远不会从空中状态落回。
@@ -34,6 +36,9 @@ public class PlayerAnimatorView : MonoBehaviour
 
     /// <summary>Animator 的 Dodge 触发器哈希（ksm.controller 中新增的参数）。</summary>
     private static readonly int DodgeParam = Animator.StringToHash("Dodge");
+
+    /// <summary>Animator 的 Attack 触发器哈希（ksm.controller 中新增的参数）。</summary>
+    private static readonly int AttackParam = Animator.StringToHash("Attack");
 
     private const string DodgeEffectRootName = "Sprite Mask";    // 闪避特效根物体（SpriteMask 遮罩窗口 + 特效之父）
     private const string DodgeEffectName = "111_export-export"; // 闪避特效子物体（sprint 片段驱动其激活与位移）
@@ -97,6 +102,13 @@ public class PlayerAnimatorView : MonoBehaviour
     {
         if (animator != null)
             animator.SetTrigger(DodgeParam);
+    }
+
+    /// <summary>触发一次普通攻击（ksm.controller 的 AnyState → normalAttack）。</summary>
+    public void TriggerAttack()
+    {
+        if (animator != null)
+            animator.SetTrigger(AttackParam);
     }
 
     // ───────────────────────────── 表现层 ─────────────────────────────
