@@ -9,6 +9,8 @@ using UnityEngine;
 /// - isGround(Bool)：是否接地，false 时 AnyState 进空中混合树，true 时回 JumpGround → idle。
 /// - IsCrouching(Bool)：是否蹲下，true 时 idle/walk/run 进 crouchDown（渐蹲过渡），
 ///   播完接 crouchIdle（蹲姿摆动循环）；false 时回 idle。
+/// - Dodge(Trigger)：闪避，AnyState → sprint。
+/// - Attack(Trigger)：普通攻击，AnyState → normalAttack（仅地面攻击触发，见 PlayerController）。
 ///
 /// velocityY、isGround 与 IsCrouching 必须每帧都写：漏写时混合树会停在默认值 velocityY = 0（最高点姿势），
 /// 而 isGround 一直是 false 时角色永远不会从空中状态落回；IsCrouching 漏写则蹲下动画不触发。
@@ -39,6 +41,9 @@ public class PlayerAnimatorView : MonoBehaviour
 
     /// <summary>蹲下状态参数哈希（ksm.controller 中新增的参数）：驱动 crouchDown / crouchIdle 两个蹲下状态。</summary>
     private static readonly int IsCrouchingParam = Animator.StringToHash("IsCrouching");
+
+    /// <summary>Animator 的 Attack 触发器哈希（ksm.controller 中新增的参数）。</summary>
+    private static readonly int AttackParam = Animator.StringToHash("Attack");
 
     private const string DodgeEffectRootName = "Sprite Mask";    // 闪避特效根物体（SpriteMask 遮罩窗口 + 特效之父）
     private const string DodgeEffectName = "111_export-export"; // 闪避特效子物体（sprint 片段驱动其激活与位移）
@@ -104,6 +109,13 @@ public class PlayerAnimatorView : MonoBehaviour
     {
         if (animator != null)
             animator.SetTrigger(DodgeParam);
+    }
+
+    /// <summary>触发一次普通攻击（ksm.controller 的 AnyState → normalAttack）。</summary>
+    public void TriggerAttack()
+    {
+        if (animator != null)
+            animator.SetTrigger(AttackParam);
     }
 
     // ───────────────────────────── 表现层 ─────────────────────────────
