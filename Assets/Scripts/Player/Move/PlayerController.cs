@@ -28,7 +28,8 @@ using UnityEngine.InputSystem;
 ///    在空中新按下蹲下键会锁存一次“下潜”：强制高速下落直至落地并转入蹲下，
 ///    期间保留空中左右操控、禁止起跳。
 /// 6. 动画由 ksm.controller 驱动：水平速度写 Speed，竖向速度写 velocityY（空中混合树），
-///    接地状态写 isGround；参数写入集中在 PlayerAnimatorView。
+///    接地状态写 isGround，蹲下状态写 IsCrouching（驱动 crouchDown 渐蹲过渡与 crouchIdle
+///    蹲姿摆动两个状态）；参数写入集中在 PlayerAnimatorView。
 /// 7. 闪避（Shift / 手柄右肩键）是一次固定时长、固定速度的水平冲刺：触发 Animator 的
 ///    Dodge 触发器进入 sprint 片段，该片段同时驱动子物体 "Sprite Mask/111_export-export"
 ///    的激活与后滑特效；冲刺期间锁定水平速度并暂停常规动画参数，结束后进入冷却。
@@ -496,7 +497,8 @@ public class PlayerController : MonoBehaviour
     // ─────────────────────────────── 动画 ───────────────────────────────
 
     /// <summary>
-    /// 把速度与接地状态交给动画组件。竖直速度与接地状态每帧都写（空中混合树依赖它们）；
+    /// 把速度与接地状态交给动画组件。竖直速度、接地状态与蹲下状态每帧都写
+    /// （空中混合树依赖前两者，蹲下动画 crouchDown / crouchIdle 依赖 IsCrouching）；
     /// Speed 只在接地且未蹲下 / 未下潜 / 未闪避时刷新，其余情况保持上一帧的值，
     /// 让 idle / walk / run 维持在当前档位。
     /// </summary>
@@ -509,7 +511,7 @@ public class PlayerController : MonoBehaviour
 
         // 空中、蹲下、下潜、闪避均不驱动 Speed：分别保持落地前最后状态或播放冲刺片段。
         bool driveLocomotion = IsGrounded && !IsCrouching && !diveLatch && !IsDodging;
-        animatorView.ApplyMotion(rb.velocity.x, velocityY, IsGrounded, driveLocomotion);
+        animatorView.ApplyMotion(rb.velocity.x, velocityY, IsGrounded, driveLocomotion, IsCrouching);
     }
 
     // ─────────────────────────────── 闪避 ───────────────────────────────

@@ -79,3 +79,8 @@ crashlytics-build.properties
 
 # Unity 编辑器插件（Codely）运行时状态：心跳/序号持续变更，不入库
 .com-unity-codely.json
+
+# 像素画工具输出（根目录预览产物：frames/gif/json/html/调色板，非 Unity 资产）
+/ksm_idle_pixel/
+/saaya_idle_v2/
+/saaya_idle_v3/
