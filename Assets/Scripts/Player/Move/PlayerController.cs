@@ -7,9 +7,10 @@ using UnityEngine.InputSystem;
 /// 键位：A/D 或 ←/→ 移动（键盘默认奔跑），Ctrl 走路，S/↓ 或 C 蹲下，Space 跳跃，Shift 闪避，J 攻击。
 /// 手柄：左摇杆移动（推动幅度线性决定速度，推满即奔跑），右肩键闪避，西键（方块）蹲下，南键跳跃，北键（△）攻击。
 ///
-/// 本组件与两个协作组件挂在同一个 GameObject 上：
+/// 本组件与三个协作组件挂在同一个 GameObject 上：
 /// - <see cref="PlayerGroundSensor"/>：物理检测（脚底薄盒探测、区域遮挡），不含规则状态。
 /// - <see cref="PlayerAnimatorView"/>：Animator 参数写入、精灵翻转、闪避特效镜像。
+/// - <see cref="PlayerState"/>：体力 / 血量双资源（HP + SP）的数值与事件，动作规则仍由本组件判定。
 ///
 /// 设计要点：
 /// 1. 输入在 Update 中采样，物理在 FixedUpdate 中执行，两者通过“跳跃缓冲”衔接，
@@ -41,12 +42,17 @@ using UnityEngine.InputSystem;
 ///    保证特效始终出现在冲刺方向的后方（实现在 PlayerAnimatorView）。
 ///    无敌帧尚未实装——待受伤系统实现时，在 IsDodging 为真期间屏蔽伤害（已预留）。
 /// 8. 普通攻击（J / 手柄北键 △）：触发 ksm.controller 的 normalAttack 片段，并在角色前方
-///    发射一枚音波（纯表现：飞行、撞墙/超时消失，无伤害无消耗）。攻击效果窗口
+///    发射一枚音波（纯表现：飞行、撞墙/超时消失，无伤害；体力消耗见第 9 条）。攻击效果窗口
 ///    （attackDuration）内移动速度按 attackMoveMultiplier 降低（不锁定）。
 ///    空中攻击不触发攻击片段——AnyState→空中状态的既有结构会在一帧内把它切回空中姿势，
 ///    且残留的触发器会在落地时误触发一次攻击；空中攻击改为纯机械效果：立即由上升切入
 ///    下落，并在攻击窗口内把下落速度限制在 attackFallSpeed，到期后恢复正常下落。
-///    伤害 / 命中 / 消耗等战斗数值留待战斗系统实现时接入（音波预制体即扩展点）。
+///    伤害 / 命中等战斗数值仍留待战斗系统实现时接入（音波预制体即扩展点）。
+/// 9. 体力 / 血量由同物体上的 <see cref="PlayerState"/> 托管（双资源模型，策划案 3.1 定稿）：
+///    跳跃 / 闪避 / 攻击为一次性消耗，地面奔跑按秒持续消耗，走路 / 站立 / 空中操控 /
+///    蹲下不消耗；当前 SP 小于消耗量时对应动作整个不发生（不部分扣除、不进冷却），
+///    地面奔跑中 SP 归零时自动降级为走路速度（不硬停，保留操控）。HP 暂只托管数值
+///    与事件，受伤 / 死亡规则待受伤系统接入。消耗数值见下方「体力消耗」节，均可调。
 /// </summary>
 [RequireComponent(typeof(Rigidbody2D))]
 public class PlayerController : MonoBehaviour
@@ -78,6 +84,10 @@ public class PlayerController : MonoBehaviour
     [Tooltip("动画控制组件（Animator 参数 / 精灵翻转 / 闪避特效），与控制器挂在同一个 GameObject 上。")]
     [SerializeField]
     private PlayerAnimatorView animatorView;
+
+    [Tooltip("体力 / 血量组件（双资源 HP + SP），与控制器挂在同一个 GameObject 上。")]
+    [SerializeField]
+    private PlayerState state;
 
     // ─────────────────────────────── 移动 ───────────────────────────────
 
@@ -162,6 +172,18 @@ public class PlayerController : MonoBehaviour
     [Tooltip("音波预制体（Assets/Scripts/Player/Attack/PlayerAttackWave.prefab）：飞行速度、存活时间、撞击层都在预制体上调。")]
     public GameObject wavePrefab;
 
+    // ───────────────────────────── 体力消耗 ─────────────────────────────
+
+    [Header("体力消耗")]
+    [Tooltip("起跳消耗的体力（由 PlayerState 支付）。不足时本次起跳不执行：跳跃缓冲会被吃掉，不会在体力恢复后的某一帧突然自己跳起来。设为 0 即恢复不耗体力的跳跃。")]
+    public float jumpStaminaCost = 10f;
+    [Tooltip("一次闪避消耗的体力。不足时闪避不执行：不进入冷却、不变朝向，蹲下状态也不会先起身。设为 0 即恢复免费闪避。")]
+    public float dodgeStaminaCost = 10f;
+    [Tooltip("一次普通攻击消耗的体力（策划案定稿 10）。不足时攻击不执行：不进入冷却、不发射音波、不触发 Attacked 事件。设为 0 即恢复免费攻击。")]
+    public float attackStaminaCost = 10f;
+    [Tooltip("地面奔跑时每秒消耗的体力。走路 / 空中操控 / 蹲下不消耗；奔跑中体力归零自动降级为走路速度（不硬停）。设为 0 即恢复免费奔跑。")]
+    public float runStaminaDrainPerSecond = 10f;
+
     // ───────────────────────────── 运行时状态 ─────────────────────────────
 
     /// <summary>当前帧的原始移动输入。</summary>
@@ -184,6 +206,9 @@ public class PlayerController : MonoBehaviour
 
     /// <summary>是否处于攻击效果窗口内（按下攻击键后的 attackDuration 秒）。</summary>
     public bool IsAttacking => attackTimer > 0f;
+
+    /// <summary>体力 / 血量组件（同物体上的 PlayerState），供技能系统 / HUD 查询。</summary>
+    public PlayerState State => state;
 
     /// <summary>1 表示朝右，-1 表示朝左。</summary>
     public int FacingDirection { get; private set; } = 1;
@@ -289,10 +314,12 @@ public class PlayerController : MonoBehaviour
             groundSensor = GetComponent<PlayerGroundSensor>();
         if (animatorView == null)
             animatorView = GetComponent<PlayerAnimatorView>();
+        if (state == null)
+            state = GetComponent<PlayerState>();
 
-        if (groundSensor == null || animatorView == null)
+        if (groundSensor == null || animatorView == null || state == null)
         {
-            Debug.LogError("PlayerController 需要同物体上的 PlayerGroundSensor 与 PlayerAnimatorView。", this);
+            Debug.LogError("PlayerController 需要同物体上的 PlayerGroundSensor、PlayerAnimatorView 与 PlayerState。", this);
             enabled = false;
             return;
         }
@@ -474,6 +501,10 @@ public class PlayerController : MonoBehaviour
         // 键盘默认奔跑（runSpeed）、按住 Ctrl 降为走路（speed）两档；
         // 手柄摇杆幅度在 0 ~ runSpeed 之间线性映射，推满即为奔跑。
         float targetSpeed = IsCrouching ? 0f : (usingKeyboard && walkInput ? speed : runSpeed);
+        // 体力耗尽时不再允许奔跑：降级为走路速度（不硬停——保留加速 / 转向操控，
+        // 避免运动中突然定住的手感；体力恢复后自动回到奔跑档）。
+        if (!IsCrouching && state != null && state.IsExhausted)
+            targetSpeed = Mathf.Min(targetSpeed, speed);
         // 攻击效果窗口内降低移动速度（不锁定：输入仍然有效，只是目标速度打折）。
         if (attackTimer > 0f)
             targetSpeed *= attackMoveMultiplier;
@@ -482,6 +513,11 @@ public class PlayerController : MonoBehaviour
         // 走 / 跑状态与动画阈值一致：目标速度超过 6（约为摇杆 75% 幅度）记为奔跑。
         IsRunning = hasInput && !IsCrouching && Mathf.Abs(targetVelocity) > 6f;
         IsWalking = hasInput && !IsCrouching && !IsRunning;
+
+        // 只有地面奔跑持续消耗体力：空中速度是跳跃惯性的延续，不另算；
+        // 蹲下 / 走路 / 站立的目标速度到不了奔跑档（> 6），不会进入本分支。
+        if (IsRunning && IsGrounded && state != null)
+            state.DrainStamina(runStaminaDrainPerSecond * Time.fixedDeltaTime);
 
         float rate = (hasInput && !IsCrouching) ? acceleration : deceleration;
         if (!IsGrounded)
@@ -517,13 +553,18 @@ public class PlayerController : MonoBehaviour
     // ─────────────────────────────── 闪避 ───────────────────────────────
 
     /// <summary>
-    /// 请求一次闪避：不在冲刺中且冷却结束时生效。方向取当前水平输入（超过死区），
+    /// 请求一次闪避：不在冲刺中、冷却结束且体力足够时生效。方向取当前水平输入（超过死区），
     /// 否则取当前朝向；触发 Animator 的 Dodge 触发器进入 sprint 片段。
+    /// 体力门控放在起身判定之前：被拒绝时没有任何状态变化（不起身、不进冷却、不变朝向）。
     /// 供 Update 的输入采样调用，将来的技能系统也可直接调用。
     /// </summary>
     public void RequestDodge()
     {
         if (rb == null || IsDodging || dodgeCooldownTimer > 0f)
+            return;
+
+        // 体力不足则整个放弃本次闪避（不消耗、不进冷却、不起身、不触发特效）。
+        if (state != null && !state.TryConsumeStamina(dodgeStaminaCost))
             return;
 
         // 蹲下状态触发闪避先尝试起身；头顶有障碍起不来则放弃本次闪避。
@@ -562,17 +603,23 @@ public class PlayerController : MonoBehaviour
     // ─────────────────────────────── 攻击 ───────────────────────────────
 
     /// <summary>
-    /// 请求一次普通攻击：冷却结束时生效。地面攻击触发 ksm.controller 的 normalAttack 片段，
+    /// 请求一次普通攻击：冷却结束且体力足够时生效。地面攻击触发 ksm.controller 的 normalAttack 片段，
     /// 并在角色前方发射一枚音波；攻击效果窗口（attackDuration）内移动速度降低（不锁定）。
     /// 空中攻击不触发攻击片段——AnyState→空中状态的既有结构会在一帧内把它切回空中姿势，
     /// 且残留的触发器会在落地时误触发一次攻击；空中攻击改为纯机械效果：立即由上升切入
     /// 下落，并在攻击窗口内把下落速度限制在 attackFallSpeed，到期后恢复正常下落。
-    /// 伤害 / 命中 / 消耗等战斗数值留待战斗系统实现时接入（音波预制体即扩展点）。
+    /// 体力消耗已接入（attackStaminaCost，策划案定稿 10；不足时整个攻击不发生：不进冷却、
+    /// 不发音波、不触发 Attacked 事件）；伤害 / 命中等战斗数值仍留待战斗系统实现时接入
+    /// （音波预制体即扩展点）。
     /// 供 Update 的输入采样调用，将来的技能系统也可直接调用。
     /// </summary>
     public void RequestAttack()
     {
         if (rb == null || attackCooldownTimer > 0f)
+            return;
+
+        // 体力不足则整个放弃本次攻击（不消耗、不进冷却、不发音波、不触发事件）。
+        if (state != null && !state.TryConsumeStamina(attackStaminaCost))
             return;
 
         attackCooldownTimer = attackCooldown;
@@ -609,10 +656,15 @@ public class PlayerController : MonoBehaviour
 
     // ─────────────────────────────── 跳跃 ───────────────────────────────
 
-    /// <summary>立即起跳（不作条件判定，供外部事件调用）。</summary>
+    /// <summary>立即起跳（不作条件判定，供外部事件调用）。体力不足时不起跳、不消耗。</summary>
     public void Jump()
     {
         if (rb == null)
+            return;
+
+        // 体力门控放在这里而不是只放在 TryJump：技能系统等外部调用同样受消耗约束，
+        // 且能保证「跳起来」与「扣体力」永远成对发生。
+        if (state != null && !state.TryConsumeStamina(jumpStaminaCost))
             return;
 
         jumpBufferTimer = 0f;
@@ -636,6 +688,13 @@ public class PlayerController : MonoBehaviour
         // 闪避期间同样不允许起跳（与下潜一致），缓冲保留到冲刺结束。
         if (IsDodging || diveLatch || (!IsGrounded && coyoteTimer <= 0f))
             return;
+
+        // 体力不足：吃掉本次跳跃缓冲后放弃——否则体力恢复后的某一帧角色会突然自己跳起来。
+        if (state != null && !state.HasStamina(jumpStaminaCost))
+        {
+            jumpBufferTimer = 0f;
+            return;
+        }
 
         Jump();
     }

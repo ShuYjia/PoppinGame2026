@@ -1580,7 +1580,7 @@ Tilemap:
       - {fileID: 527543861, guid: 160adf65cc458614d8db0183ba19f07a, type: 3}
       - {fileID: -1224600485, guid: 160adf65cc458614d8db0183ba19f07a, type: 3}
       - {fileID: -442214986, guid: 160adf65cc458614d8db0183ba19f07a, type: 3}
-      m_AnimationSpeed: 7
+      m_AnimationSpeed: 7.0000005
       m_AnimationTimeOffset: 0
       m_Flags: 0
   - first: {x: 11, y: 2, z: 0}
@@ -2031,6 +2031,7 @@ GameObject:
   - component: {fileID: 782817710}
   - component: {fileID: 782817712}
   - component: {fileID: 782817711}
+  - component: {fileID: 782817713}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -2120,6 +2121,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   groundSensor: {fileID: 782817712}
   animatorView: {fileID: 782817711}
+  state: {fileID: 782817713}
   speed: 5
   runSpeed: 8
   crouchDiveSpeed: 20
@@ -2149,6 +2151,10 @@ MonoBehaviour:
   attackFallSpeed: 3
   waveSpawnOffset: 0.3
   wavePrefab: {fileID: 6212759426798730618, guid: 156781d56eaa3494f846e2d3534dfd49, type: 3}
+  jumpStaminaCost: 10
+  dodgeStaminaCost: 10
+  attackStaminaCost: 10
+  runStaminaDrainPerSecond: 10
   rb: {fileID: 0}
 --- !u!50 &782817708
 Rigidbody2D:
@@ -2265,6 +2271,21 @@ MonoBehaviour:
   groundCheckDistance: 0.02
   groundCheckWidthScale: 0.9
   drawGizmos: 1
+--- !u!114 &782817713
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 782817703}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 715bdd4c7b8ff8542a7297ed60c30b2b, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  maxHP: 100
+  maxSP: 100
+  spRegenPerSecond: 8
 --- !u!1 &936214860
 GameObject:
   m_ObjectHideFlags: 0
