@@ -43,11 +43,12 @@ public class PlayerState : MonoBehaviour
     /// </summary>
     public const float ReferenceFps = 60f;
 
-    /// <summary>当前生命值。</summary>
-    public float CurrentHP { get; private set; }
+    [Header("运行时数值（Play 中可直接修改，用于调试）")]
+    [Tooltip("当前生命值。Play 中直接改这里即可构造受伤 / 死亡测试；直接改字段不会触发 HealthChanged 事件（调试面板每帧读取，显示会立即跟上），退出 Play 后还原为进 Play 时的值。")]
+    public float CurrentHP;
 
-    /// <summary>当前体力值。</summary>
-    public float CurrentSP { get; private set; }
+    [Tooltip("当前体力值。Play 中直接改这里即可构造体力门控测试（如设成 5 再跳跃 / 闪避 / 攻击）；直接改字段不会触发 StaminaChanged 事件（调试面板每帧读取，显示会立即跟上），退出 Play 后还原为进 Play 时的值。")]
+    public float CurrentSP;
 
     /// <summary>生命归一化值（0~1），供 HUD 血条使用。</summary>
     public float HP01 => maxHP <= 0f ? 0f : Mathf.Clamp01(CurrentHP / maxHP);
@@ -86,6 +87,14 @@ public class PlayerState : MonoBehaviour
 
         maxHP = Mathf.Max(1f, maxHP);
         maxSP = Mathf.Max(1f, maxSP);
+
+        // 编辑模式下把当前值同步成上限，只为 Inspector 观感与直觉一致：
+        // CurrentHP / CurrentSP 是序列化字段，首次保存时会是 0，显示「0 / 100」容易误以为坏了。
+        // 进 Play 时 Awake 本来也会重置为满值，所以编辑模式下这两个值不承载状态。
+        // 必须在 Application.isPlaying 早退之后——Play 中手动改当前值不能被覆盖，
+        // 否则调试改动会被立刻抹掉。
+        CurrentHP = maxHP;
+        CurrentSP = maxSP;
     }
 
     private void Update()
