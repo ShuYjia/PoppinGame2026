@@ -50,9 +50,11 @@ using UnityEngine.InputSystem;
 ///    伤害 / 命中等战斗数值仍留待战斗系统实现时接入（音波预制体即扩展点）。
 /// 9. 体力 / 血量由同物体上的 <see cref="PlayerState"/> 托管（双资源模型，策划案 3.1 定稿）：
 ///    跳跃 / 闪避 / 攻击为一次性消耗，地面奔跑按秒持续消耗，走路 / 站立 / 空中操控 /
-///    蹲下不消耗；当前 SP 小于消耗量时对应动作整个不发生（不部分扣除、不进冷却），
-///    地面奔跑中 SP 归零时自动降级为走路速度（不硬停，保留操控）。HP 暂只托管数值
-///    与事件，受伤 / 死亡规则待受伤系统接入。消耗数值见下方「体力消耗」节，均可调。
+///    蹲下不消耗；当前 SP 小于消耗量时对应动作整个不发生（不部分扣除、不进冷却）。
+///    SP 由 PlayerState 每帧自动恢复（spRegenPerFrame），蹲下时按 crouchRegenMultiplier
+///    加速；奔跑中 SP 归零会把奔跑档锁定为走路，玩家先回到走路 / 停步、再重新推起来
+///    才恢复奔跑（避免体力刚回一点就在跑 / 走之间来回抽）。HP 暂只托管数值与事件，
+///    受伤 / 死亡规则待受伤系统接入。消耗数值见下方「体力消耗」节，均可调。
 /// </summary>
 [RequireComponent(typeof(Rigidbody2D))]
 public class PlayerController : MonoBehaviour
@@ -181,7 +183,7 @@ public class PlayerController : MonoBehaviour
     public float dodgeStaminaCost = 10f;
     [Tooltip("一次普通攻击消耗的体力（策划案定稿 10）。不足时攻击不执行：不进入冷却、不发射音波、不触发 Attacked 事件。设为 0 即恢复免费攻击。")]
     public float attackStaminaCost = 10f;
-    [Tooltip("地面奔跑时每秒消耗的体力。走路 / 空中操控 / 蹲下不消耗；奔跑中体力归零自动降级为走路速度（不硬停）。设为 0 即恢复免费奔跑。")]
+    [Tooltip("地面奔跑时每秒消耗的体力。走路 / 空中操控 / 蹲下不消耗；奔跑中体力耗尽会把奔跑档锁定为走路，直到玩家回到走路 / 停步后重新推起。设为 0 即恢复免费奔跑。")]
     public float runStaminaDrainPerSecond = 10f;
 
     // ───────────────────────────── 运行时状态 ─────────────────────────────
@@ -279,6 +281,7 @@ public class PlayerController : MonoBehaviour
     private bool attackInputPrev;
     private bool airAttackCutPending;
     private bool usingKeyboard = true;
+    private bool runLocked;             // 奔跑中体力耗尽后锁定走路档，直到玩家重回走路 / 停步
 
     private float jumpBufferTimer;
     private float coyoteTimer;
@@ -404,6 +407,9 @@ public class PlayerController : MonoBehaviour
 
         // 闪避期间强制站姿：冲刺中不接受蹲下（蹲下状态触发闪避会先尝试起身）。
         SetCrouching(crouchInput && IsGrounded && !IsDodging);
+        // 蹲下状态同步给 PlayerState：蹲下时体力恢复加速（倍率在 PlayerState 上）。
+        if (state != null)
+            state.SetCrouching(IsCrouching);
         UpdateFacing();
         UpdateAnimation();
 
@@ -497,13 +503,21 @@ public class PlayerController : MonoBehaviour
         float inputX = Mathf.Abs(InputDirection.x) < inputDeadZone ? 0f : InputDirection.x;
         bool hasInput = Mathf.Abs(inputX) > Mathf.Epsilon;
 
+        // 玩家此刻是否「在要求奔跑档」：有输入、未蹲下、未按走路键，且输入映射超过奔跑阈值。
+        // 它只用于解锁：必须真的回到走路 / 停步，再推起来才算「重新进入奔跑」。
+        bool wantsRun = hasInput && !IsCrouching
+            && !(usingKeyboard && walkInput)
+            && Mathf.Abs(inputX) * runSpeed > 6f;
+        if (runLocked && !wantsRun)
+            runLocked = false;
+
         // 目标速度：蹲下 = 0（缓停，保证机关 / 敌人推得动）；
         // 键盘默认奔跑（runSpeed）、按住 Ctrl 降为走路（speed）两档；
         // 手柄摇杆幅度在 0 ~ runSpeed 之间线性映射，推满即为奔跑。
         float targetSpeed = IsCrouching ? 0f : (usingKeyboard && walkInput ? speed : runSpeed);
-        // 体力耗尽时不再允许奔跑：降级为走路速度（不硬停——保留加速 / 转向操控，
-        // 避免运动中突然定住的手感；体力恢复后自动回到奔跑档）。
-        if (!IsCrouching && state != null && state.IsExhausted)
+        // 奔跑中体力耗尽后锁定在走路档：即使体力回了一点、摇杆仍推着，也不会自动切回奔跑；
+        // 只有玩家先回到走路 / 停步（wantsRun 变 false）解除锁定，再次推起来才恢复奔跑。
+        if (runLocked)
             targetSpeed = Mathf.Min(targetSpeed, speed);
         // 攻击效果窗口内降低移动速度（不锁定：输入仍然有效，只是目标速度打折）。
         if (attackTimer > 0f)
@@ -517,7 +531,12 @@ public class PlayerController : MonoBehaviour
         // 只有地面奔跑持续消耗体力：空中速度是跳跃惯性的延续，不另算；
         // 蹲下 / 走路 / 站立的目标速度到不了奔跑档（> 6），不会进入本分支。
         if (IsRunning && IsGrounded && state != null)
+        {
             state.DrainStamina(runStaminaDrainPerSecond * Time.fixedDeltaTime);
+            // 跑着把体力耗光 → 锁定走路档（本帧速度仍是奔跑值，下一帧起降为走路）。
+            if (state.IsExhausted)
+                runLocked = true;
+        }
 
         float rate = (hasInput && !IsCrouching) ? acceleration : deceleration;
         if (!IsGrounded)
