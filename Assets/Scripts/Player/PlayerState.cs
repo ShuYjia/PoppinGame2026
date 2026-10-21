@@ -8,13 +8,14 @@ using UnityEngine;
 /// 双资源模型（策划案 3.1 定稿）：
 /// - HP（生存资源）：上限 maxHP，关卡内不自动回复（策划案：仅在 Saya 处回满）。
 ///   受伤 / 死亡 / 读档恢复等规则由将来的受伤系统接入，本组件先托管数值与事件。
-/// - SP（操作资源）：上限 maxSP，**每帧**自动恢复 spRegenPerFrame（不乘 deltaTime）；
+/// - SP（操作资源）：上限 maxSP，**每帧**自动恢复 spRegenPerFrame（数值按 60fps 基准填，
+///   运行时乘 Time.deltaTime × ReferenceFps 换算，帧率高低下手感一致）；
 ///   蹲下时恢复速度再乘 crouchRegenMultiplier（玩家可通过蹲下加速回体力）。
 ///   消耗由动作门控发起，归零后果是「无法执行对应操作」，不会死亡。
 ///
 /// 消耗口径（策划案 3.1 待确认段建议）：当前 SP &lt; 消耗量时动作不执行。
 /// 一次性动作（跳跃 / 闪避 / 攻击）用 <see cref="TryConsumeStamina"/>；
-/// 持续动作（地面奔跑）用 <see cref="DrainStamina"/> 按秒扣，扣到 0 为止
+/// 持续动作（地面奔跑）用 <see cref="DrainStamina"/> 按帧扣，扣到 0 为止
 /// （由 PlayerController 在奔跑中 SP 归零时锁定为走路，直到玩家重新从走路进入奔跑）。
 ///
 /// 蹲下状态由 PlayerController 每帧通过 <see cref="SetCrouching"/> 同步（本组件不反向查询控制器）。
@@ -31,10 +32,16 @@ public class PlayerState : MonoBehaviour
     [Header("体力 SP")]
     [Tooltip("体力上限。策划案定稿 100。")]
     public float maxSP = 100f;
-    [Tooltip("每帧自动恢复的体力（不乘 deltaTime，逐帧累加）。0.15 在 60fps 下约 9/秒；注意恢复速度会随帧率变化。")]
-    public float spRegenPerFrame = 0.15f;
+    [Tooltip("每帧自动恢复的体力（60fps 基准，运行时按帧时长换算，60Hz / 144Hz 手感一致）。0.1 ≈ 6/秒。")]
+    public float spRegenPerFrame = 0.1f;
     [Tooltip("蹲下时的恢复倍率：蹲下每帧恢复 spRegenPerFrame × 本值。1 表示蹲下不额外加成。")]
     public float crouchRegenMultiplier = 2f;
+
+    /// <summary>
+    /// 「每帧数值」的基准帧率：Inspector 里填的数字都是 60fps 下的每帧增量。
+    /// 运行时按 Time.deltaTime × 本值换算，避免高刷新率（如 144Hz）把恢复 / 消耗放大 2 倍以上。
+    /// </summary>
+    public const float ReferenceFps = 60f;
 
     /// <summary>当前生命值。</summary>
     public float CurrentHP { get; private set; }
@@ -83,12 +90,14 @@ public class PlayerState : MonoBehaviour
 
     private void Update()
     {
-        // 体力自动恢复：每帧直接加（不乘 deltaTime，口径即「每帧多少」），补满即停。
-        // 数值没变就不触发事件，免去 HUD 无谓刷新。蹲下时按 crouchRegenMultiplier 加速。
+        // 体力自动恢复：每帧结算一次（帧口径），并按 60fps 基准换算时长。
+        // 注意：不能只按帧数硬加——高刷新率会等比放大恢复量（144Hz 下 0.15/帧 = 21.6/秒），
+        // 会直接盖过奔跑消耗（12/秒），表现为「一直跑体力却是满的」。
+        // 蹲下时按 crouchRegenMultiplier 加速；补满即停，数值没变就不触发事件。
         if (spRegenPerFrame > 0f && CurrentSP < maxSP)
         {
-            float regenPerFrame = spRegenPerFrame * (IsCrouching ? Mathf.Max(0f, crouchRegenMultiplier) : 1f);
-            RestoreStamina(regenPerFrame);
+            float multiplier = IsCrouching ? Mathf.Max(0f, crouchRegenMultiplier) : 1f;
+            RestoreStamina(spRegenPerFrame * multiplier * (Time.deltaTime * ReferenceFps));
         }
     }
 

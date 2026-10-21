@@ -2032,6 +2032,7 @@ GameObject:
   - component: {fileID: 782817712}
   - component: {fileID: 782817711}
   - component: {fileID: 782817713}
+  - component: {fileID: 782817714}
   m_Layer: 0
   m_Name: Player
   m_TagString: Untagged
@@ -2127,7 +2128,7 @@ MonoBehaviour:
   crouchDiveSpeed: 20
   acceleration: 60
   deceleration: 80
-  airControl: 0.6
+  airControl: 0.86194533
   airBrakeControl: 0.25
   inputDeadZone: 0.15
   jumpHeight: 2.9
@@ -2154,7 +2155,7 @@ MonoBehaviour:
   jumpStaminaCost: 10
   dodgeStaminaCost: 10
   attackStaminaCost: 10
-  runStaminaDrainPerSecond: 10
+  runStaminaDrainPerFrame: 0.2
   rb: {fileID: 0}
 --- !u!50 &782817708
 Rigidbody2D:
@@ -2285,8 +2286,22 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   maxHP: 100
   maxSP: 100
-  spRegenPerFrame: 0.15
+  spRegenPerFrame: 0.1
   crouchRegenMultiplier: 2
+--- !u!114 &782817714
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 782817703}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 74463cf614a687b4592af36dee0407b5, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  visible: 1
+  screenOffset: {x: 12, y: 12}
 --- !u!1 &936214860
 GameObject:
   m_ObjectHideFlags: 0

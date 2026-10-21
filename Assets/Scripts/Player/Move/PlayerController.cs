@@ -49,8 +49,9 @@ using UnityEngine.InputSystem;
 ///    下落，并在攻击窗口内把下落速度限制在 attackFallSpeed，到期后恢复正常下落。
 ///    伤害 / 命中等战斗数值仍留待战斗系统实现时接入（音波预制体即扩展点）。
 /// 9. 体力 / 血量由同物体上的 <see cref="PlayerState"/> 托管（双资源模型，策划案 3.1 定稿）：
-///    跳跃 / 闪避 / 攻击为一次性消耗，地面奔跑按秒持续消耗，走路 / 站立 / 空中操控 /
-///    蹲下不消耗；当前 SP 小于消耗量时对应动作整个不发生（不部分扣除、不进冷却）。
+///    跳跃 / 闪避 / 攻击为一次性消耗，地面奔跑按帧持续消耗（数值均以 60fps 为基准、
+///    运行时按帧时长换算），走路 / 站立 / 空中操控 / 蹲下不消耗；当前 SP 小于消耗量时
+///    对应动作整个不发生（不部分扣除、不进冷却）。
 ///    SP 由 PlayerState 每帧自动恢复（spRegenPerFrame），蹲下时按 crouchRegenMultiplier
 ///    加速；奔跑中 SP 归零会把奔跑档锁定为走路，玩家先回到走路 / 停步、再重新推起来
 ///    才恢复奔跑（避免体力刚回一点就在跑 / 走之间来回抽）。HP 暂只托管数值与事件，
@@ -183,8 +184,8 @@ public class PlayerController : MonoBehaviour
     public float dodgeStaminaCost = 10f;
     [Tooltip("一次普通攻击消耗的体力（策划案定稿 10）。不足时攻击不执行：不进入冷却、不发射音波、不触发 Attacked 事件。设为 0 即恢复免费攻击。")]
     public float attackStaminaCost = 10f;
-    [Tooltip("地面奔跑时每秒消耗的体力。走路 / 空中操控 / 蹲下不消耗；奔跑中体力耗尽会把奔跑档锁定为走路，直到玩家回到走路 / 停步后重新推起。设为 0 即恢复免费奔跑。")]
-    public float runStaminaDrainPerSecond = 10f;
+    [Tooltip("地面奔跑时每帧消耗的体力（60fps 基准，运行时按帧时长换算，高/低刷新率手感一致）。0.2 ≈ 12/秒，配合恢复 0.1/帧（6/秒）约 17 秒跑空。走路 / 空中操控 / 蹲下不消耗；奔跑中体力耗尽会把奔跑档锁定为走路，直到玩家回到走路 / 停步后重新推起。设为 0 即恢复免费奔跑。")]
+    public float runStaminaDrainPerFrame = 0.2f;
 
     // ───────────────────────────── 运行时状态 ─────────────────────────────
 
@@ -532,7 +533,8 @@ public class PlayerController : MonoBehaviour
         // 蹲下 / 走路 / 站立的目标速度到不了奔跑档（> 6），不会进入本分支。
         if (IsRunning && IsGrounded && state != null)
         {
-            state.DrainStamina(runStaminaDrainPerSecond * Time.fixedDeltaTime);
+            // 每帧消耗量按 60fps 基准换算：物理帧固定 50Hz，乘 fixedDeltaTime × 60 得到「每秒 = 数值 × 60」。
+            state.DrainStamina(runStaminaDrainPerFrame * (Time.fixedDeltaTime * PlayerState.ReferenceFps));
             // 跑着把体力耗光 → 锁定走路档（本帧速度仍是奔跑值，下一帧起降为走路）。
             if (state.IsExhausted)
                 runLocked = true;
