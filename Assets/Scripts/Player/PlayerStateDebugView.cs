@@ -4,10 +4,10 @@ using UnityEngine;
 /// 【临时调试用】在 Game 视图左上角显示玩家 HP / SP 与当前运动状态，方便在正式 HUD 做好之前
 /// 直接观察体力消耗是否符合预期。
 ///
-/// 只读取 PlayerState / PlayerController，不参与任何玩法逻辑；正式 HUD 接入后
+/// 只读取 CharacterState / PlayerController，不参与任何玩法逻辑；正式 HUD 接入后
 /// 删除本脚本并移除 Player 上的该组件即可，不影响其它系统。
 /// </summary>
-[RequireComponent(typeof(PlayerState))]
+[RequireComponent(typeof(CharacterState))]
 public class PlayerStateDebugView : MonoBehaviour
 {
     [Tooltip("是否显示调试面板。")]
@@ -15,7 +15,7 @@ public class PlayerStateDebugView : MonoBehaviour
     [Tooltip("面板左上角偏移（像素，相对屏幕左上角）。")]
     public Vector2 screenOffset = new Vector2(12f, 12f);
 
-    private PlayerState state;
+    private CharacterState state;
     private PlayerController controller;
     private GUIStyle boldStyle;
     private GUIStyle smallStyle;
@@ -28,7 +28,7 @@ public class PlayerStateDebugView : MonoBehaviour
     private void Refresh()
     {
         if (state == null)
-            state = GetComponent<PlayerState>();
+            state = GetComponent<CharacterState>();
         if (controller == null)
             controller = GetComponent<PlayerController>();
     }

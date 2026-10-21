@@ -10,7 +10,7 @@ using UnityEngine.InputSystem;
 /// 本组件与三个协作组件挂在同一个 GameObject 上：
 /// - <see cref="PlayerGroundSensor"/>：物理检测（脚底薄盒探测、区域遮挡），不含规则状态。
 /// - <see cref="PlayerAnimatorView"/>：Animator 参数写入、精灵翻转、闪避特效镜像。
-/// - <see cref="PlayerState"/>：体力 / 血量双资源（HP + SP）的数值与事件，动作规则仍由本组件判定。
+/// - <see cref="CharacterState"/>：体力 / 血量双资源（HP + SP）的数值与事件，动作规则仍由本组件判定。
 ///
 /// 设计要点：
 /// 1. 输入在 Update 中采样，物理在 FixedUpdate 中执行，两者通过“跳跃缓冲”衔接，
@@ -48,11 +48,11 @@ using UnityEngine.InputSystem;
 ///    且残留的触发器会在落地时误触发一次攻击；空中攻击改为纯机械效果：立即由上升切入
 ///    下落，并在攻击窗口内把下落速度限制在 attackFallSpeed，到期后恢复正常下落。
 ///    伤害 / 命中等战斗数值仍留待战斗系统实现时接入（音波预制体即扩展点）。
-/// 9. 体力 / 血量由同物体上的 <see cref="PlayerState"/> 托管（双资源模型，策划案 3.1 定稿）：
+/// 9. 体力 / 血量由同物体上的 <see cref="CharacterState"/> 托管（双资源模型，策划案 3.1 定稿）：
 ///    跳跃 / 闪避 / 攻击为一次性消耗，地面奔跑按帧持续消耗（数值均以 60fps 为基准、
 ///    运行时按帧时长换算），走路 / 站立 / 空中操控 / 蹲下不消耗；当前 SP 小于消耗量时
 ///    对应动作整个不发生（不部分扣除、不进冷却）。
-///    SP 由 PlayerState 每帧自动恢复（spRegenPerFrame），蹲下时按 crouchRegenMultiplier
+///    SP 由 CharacterState 每帧自动恢复（spRegenPerFrame），蹲下时按 crouchRegenMultiplier
 ///    加速；奔跑中 SP 归零会把奔跑档锁定为走路，玩家先回到走路 / 停步、再重新推起来
 ///    才恢复奔跑（避免体力刚回一点就在跑 / 走之间来回抽）。HP 暂只托管数值与事件，
 ///    受伤 / 死亡规则待受伤系统接入。消耗数值见下方「体力消耗」节，均可调。
@@ -90,7 +90,7 @@ public class PlayerController : MonoBehaviour
 
     [Tooltip("体力 / 血量组件（双资源 HP + SP），与控制器挂在同一个 GameObject 上。")]
     [SerializeField]
-    private PlayerState state;
+    private CharacterState state;
 
     // ─────────────────────────────── 移动 ───────────────────────────────
 
@@ -178,7 +178,7 @@ public class PlayerController : MonoBehaviour
     // ───────────────────────────── 体力消耗 ─────────────────────────────
 
     [Header("体力消耗")]
-    [Tooltip("起跳消耗的体力（由 PlayerState 支付）。不足时本次起跳不执行：跳跃缓冲会被吃掉，不会在体力恢复后的某一帧突然自己跳起来。设为 0 即恢复不耗体力的跳跃。")]
+    [Tooltip("起跳消耗的体力（由 CharacterState 支付）。不足时本次起跳不执行：跳跃缓冲会被吃掉，不会在体力恢复后的某一帧突然自己跳起来。设为 0 即恢复不耗体力的跳跃。")]
     public float jumpStaminaCost = 10f;
     [Tooltip("一次闪避消耗的体力。不足时闪避不执行：不进入冷却、不变朝向，蹲下状态也不会先起身。设为 0 即恢复免费闪避。")]
     public float dodgeStaminaCost = 10f;
@@ -210,8 +210,8 @@ public class PlayerController : MonoBehaviour
     /// <summary>是否处于攻击效果窗口内（按下攻击键后的 attackDuration 秒）。</summary>
     public bool IsAttacking => attackTimer > 0f;
 
-    /// <summary>体力 / 血量组件（同物体上的 PlayerState），供技能系统 / HUD 查询。</summary>
-    public PlayerState State => state;
+    /// <summary>体力 / 血量组件（同物体上的 CharacterState），供技能系统 / HUD 查询。</summary>
+    public CharacterState State => state;
 
     /// <summary>1 表示朝右，-1 表示朝左。</summary>
     public int FacingDirection { get; private set; } = 1;
@@ -319,11 +319,11 @@ public class PlayerController : MonoBehaviour
         if (animatorView == null)
             animatorView = GetComponent<PlayerAnimatorView>();
         if (state == null)
-            state = GetComponent<PlayerState>();
+            state = GetComponent<CharacterState>();
 
         if (groundSensor == null || animatorView == null || state == null)
         {
-            Debug.LogError("PlayerController 需要同物体上的 PlayerGroundSensor、PlayerAnimatorView 与 PlayerState。", this);
+            Debug.LogError("PlayerController 需要同物体上的 PlayerGroundSensor、PlayerAnimatorView 与 CharacterState。", this);
             enabled = false;
             return;
         }
@@ -408,7 +408,7 @@ public class PlayerController : MonoBehaviour
 
         // 闪避期间强制站姿：冲刺中不接受蹲下（蹲下状态触发闪避会先尝试起身）。
         SetCrouching(crouchInput && IsGrounded && !IsDodging);
-        // 蹲下状态同步给 PlayerState：蹲下时体力恢复加速（倍率在 PlayerState 上）。
+        // 蹲下状态同步给 CharacterState：蹲下时体力恢复加速（倍率在 CharacterState 上）。
         if (state != null)
             state.SetCrouching(IsCrouching);
         UpdateFacing();
@@ -534,7 +534,7 @@ public class PlayerController : MonoBehaviour
         if (IsRunning && IsGrounded && state != null)
         {
             // 每帧消耗量按 60fps 基准换算：物理帧固定 50Hz，乘 fixedDeltaTime × 60 得到「每秒 = 数值 × 60」。
-            state.DrainStamina(runStaminaDrainPerFrame * (Time.fixedDeltaTime * PlayerState.ReferenceFps));
+            state.DrainStamina(runStaminaDrainPerFrame * (Time.fixedDeltaTime * CharacterState.ReferenceFps));
             // 跑着把体力耗光 → 锁定走路档（本帧速度仍是奔跑值，下一帧起降为走路）。
             if (state.IsExhausted)
                 runLocked = true;
@@ -576,6 +576,8 @@ public class PlayerController : MonoBehaviour
     /// <summary>
     /// 请求一次闪避：不在冲刺中、冷却结束且体力足够时生效。方向取当前水平输入（超过死区），
     /// 否则取当前朝向；触发 Animator 的 Dodge 触发器进入 sprint 片段。
+    /// 冲刺期间携带无敌帧：免疫所有来源的伤害，时长与冲刺同步（= dodgeDuration，
+    /// Inspector 调闪避时长时无敌帧自动跟随，状态组件内部按真实时间倒计时、到点自解）。
     /// 体力门控放在起身判定之前：被拒绝时没有任何状态变化（不起身、不进冷却、不变朝向）。
     /// 供 Update 的输入采样调用，将来的技能系统也可直接调用。
     /// </summary>
@@ -614,6 +616,11 @@ public class PlayerController : MonoBehaviour
 
         IsDodging = true;
         dodgeTimer = dodgeDuration;
+
+        // 闪避无敌帧：整个冲刺期间免疫所有来源的伤害。与冲刺共用 dodgeDuration，
+        // Inspector 调整闪避时长时无敌帧自动同步（CharacterState 内部按真实时间倒计时）。
+        if (state != null)
+            state.SetGlobalInvincible(dodgeDuration);
 
         if (animatorView != null)
             animatorView.TriggerDodge();

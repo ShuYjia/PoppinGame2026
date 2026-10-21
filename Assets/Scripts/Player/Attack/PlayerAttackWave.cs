@@ -5,8 +5,10 @@ using UnityEngine;
 /// 朝向用 SpriteRenderer.flipX 镜像（贴图朝左绘制），不走负缩放——URP 2D 会背面剔除整物体。
 /// 默认驱动 Assets/Art/FX/NorAttack/NormalAttackFx.png 的切片序列帧（左侧声波弧 + 右侧音符星星），
 /// 播放一遍后停在最后一帧（非循环），与寿命自然衔接。
-/// 纯表现道具：伤害、命中判定与消耗留待战斗系统实现时在本预制体上扩展
-/// （PlayerController.RequestAttack 即调用入口）。
+///
+/// 伤害由预制体上的 <see cref="Attack"/> 组件结算（进入触发即造成伤害并销毁本物体）；
+/// 撞到带 <see cref="CharacterState"/> 的目标时不当成墙销毁（否则伤害还没生效就没了），
+/// 由 Attack 命中后自行销毁。发射者（owner）及其子物体既不算障碍，也不会被误伤。
 /// </summary>
 public class PlayerAttackWave : MonoBehaviour
 {
@@ -37,19 +39,28 @@ public class PlayerAttackWave : MonoBehaviour
     private int direction = 1;
     private SpriteRenderer spriteRenderer;
     private Transform owner;
+    private Attack attack;
 
     private void Awake()
     {
         spriteRenderer = GetComponent<SpriteRenderer>();
+        attack = GetComponent<Attack>();
     }
 
     /// <summary>按方向发射：direction &gt;= 0 朝右，否则朝左。序列帧从第 0 帧开始。</summary>
     /// <param name="launchDirection">发射方向（1 右 / -1 左）。</param>
-    /// <param name="ownerTransform">生成者（玩家） Transform：撞墙检测时排除，避免出生即判定撞墙。</param>
+    /// <param name="ownerTransform">生成者（玩家） Transform：撞墙检测时排除，避免出生即判定撞墙；
+    /// 同时交给身上的 Attack 作为 owner，音波不会打中玩家自己。</param>
     public void Launch(int launchDirection, Transform ownerTransform = null)
     {
         direction = launchDirection >= 0 ? 1 : -1;
         owner = ownerTransform;
+
+        // 预制体可能在 Awake 之后才挂上 Attack（或本实例是旧对象），这里做一次兜底获取。
+        if (attack == null)
+            attack = GetComponent<Attack>();
+        if (attack != null)
+            attack.owner = ownerTransform;
 
         frameIndex = 0;
         frameTimer = 0f;
@@ -134,6 +145,10 @@ public class PlayerAttackWave : MonoBehaviour
                 continue;
             // 自己（挂在玩家身上的子碰撞体）不算障碍。
             if (owner != null && (hit.transform == owner || hit.transform.IsChildOf(owner)))
+                continue;
+            // 带 CharacterState 的物体是可攻击目标而不是墙：音波穿过去，由 Attack 触发器
+            // 结算伤害并销毁本体。若在这里当墙销毁，触发伤害还没生效音波就消失了。
+            if (hit.GetComponentInParent<CharacterState>() != null)
                 continue;
             return true;
         }
