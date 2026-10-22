@@ -22,11 +22,15 @@
 ## 1. 任务开始前的基线检查（必做）
 
 ```bash
-git status --short        # 工作区是否干净；哪些是用户的未提交改动
-git branch --show-current # 当前分支
-git log --oneline -5      # 最近的锚点在哪
+git fetch origin                  # 取远端最新状态（只读，不动工作区/本地分支）
+git status --short                # 工作区是否干净；哪些是用户的未提交改动
+git branch --show-current         # 当前分支
+git log --oneline -5              # 最近的锚点在哪
+git rev-list --left-right --count main...origin/main   # 本地 main 与远端 main 相差多少提交
 ```
 
+- **分支基点询问（每次新对话/新任务改动前必做）**：先向用户报告当前分支、与 `origin/main` 的差距、工作区未提交改动，然后**询问用户**是否基于最新 `origin/main` 创建 `codex/<任务名>` 分支；用户确认后才执行 `git switch -c codex/<任务名> origin/main`。用户选择其他基点（本地 main / 指定 tag / 留在当前分支）时按其指定执行，并在报告里写明基点。**目的：防止在错误分支或旧分支上修改。**
+- 工作区有未提交改动时，先报告并由用户决定处理方式（带到新分支 / 先提交到当前分支 / 先 stash），不得擅自 pull 或切分支。
 - **已有未提交改动一律视为用户财产**：不提交、不覆盖、不清理、不回退，只操作本次任务明确涉及的文件（`AGENTS.md` 原文要求）。
 - 若工作区里有与本任务文件冲突的用户改动，先停下来报告，由用户决定先整理还是并行。
 
@@ -38,7 +42,7 @@ git log --oneline -5      # 最近的锚点在哪
 | `codex/<简短任务名>` | AI 任务分支 | 每个任务一条分支；checkpoint 提交都发生在这里 |
 | `hotfix/<问题名>` | 紧急修复 | 从 main 或某个 tag 拉出，修完同样经确认后合并 |
 
-- 任务开始时：`git switch -c codex/<任务名>`（从 main 或用户指定的基点拉出）。
+- 任务开始时：`git switch -c codex/<任务名>`（默认基于最新 `origin/main` 拉出；拉出前须先按第 1 节询问用户，或按用户指定基点）。
 - 长任务期间 main 有更新：优先 `git merge main`（保留真实历史），不 rebase 已推送的分支。
 - 分支合并完成后是否删除远程分支：默认**保留**，用户说删才删（历史审计需要）。
 
@@ -151,7 +155,7 @@ git log --oneline -5      # 最近的锚点在哪
 
 1. ☐ 检测 Unity MCP 连接（[`UNITY_MCP.md`](UNITY_MCP.md)）
 2. ☐ 基线检查：`git status` / 分支 / 最近锚点（第 1 节）
-3. ☐ 说明验收条件，开/确认 `codex/<任务名>` 分支
+3. ☐ 说明验收条件；**询问用户是否基于最新 `origin/main` 开/确认 `codex/<任务名>` 分支**（第 1 节）
 4. ☐ 改动 + Unity 验证（编译 / Console / Editor / Play）
 5. ☐ 过第 3.2 节提交前检查清单 → checkpoint 提交
 6. ☐ （用户要求时才推送）任务结束报告里提醒未推送锚点数量，询问是否需要推送备份
