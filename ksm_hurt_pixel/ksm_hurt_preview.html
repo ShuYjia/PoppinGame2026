@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ksm · 像素受击动画预览</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#181b22; --panel2:#1f232c; --line:#2b3040;
+    --fg:#e8eaf0; --dim:#98a0b3; --accent:#e79cbb; --accent2:#ffda96;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);
+       font-family:"Segoe UI","PingFang SC","Microsoft YaHei",system-ui,sans-serif;}
+  .wrap{max-width:1180px;margin:0 auto;padding:26px 22px 60px}
+  h1{font-size:19px;margin:0 0 4px;letter-spacing:.3px}
+  h1 span{color:var(--accent)}
+  .sub{color:var(--dim);font-size:12.5px;margin-bottom:20px;line-height:1.7}
+  .sub code{background:var(--panel2);padding:1px 6px;border-radius:4px;color:var(--accent2);font-size:11.5px}
+  .stage{display:grid;grid-template-columns:1fr 300px;gap:18px;align-items:start}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .viewport{position:relative;display:flex;align-items:center;justify-content:center;
+            min-height:460px;border-radius:10px;overflow:hidden}
+  .viewport.checker{background-image:
+      linear-gradient(45deg,#23262e 25%,transparent 25%,transparent 75%,#23262e 75%),
+      linear-gradient(45deg,#23262e 25%,transparent 25%,transparent 75%,#23262e 75%);
+    background-size:16px 16px;background-position:0 0,8px 8px;background-color:#1a1d24}
+  .viewport.dark{background:#12141a}
+  .viewport.light{background:#f2f3f6}
+  .viewport.grid{background-image:linear-gradient(rgba(255,255,255,.055) 1px,transparent 1px),
+      linear-gradient(90deg,rgba(255,255,255,.055) 1px,transparent 1px)}
+  canvas{image-rendering:pixelated;image-rendering:crisp-edges;display:block}
+  .stagebox{position:relative}
+  .meta{position:absolute;left:12px;top:12px;font-size:11.5px;color:var(--dim);
+        background:rgba(12,14,18,.72);padding:5px 9px;border-radius:6px;
+        border:1px solid var(--line);font-variant-numeric:tabular-nums}
+  .meta b{color:var(--accent)}
+  .guide{position:absolute;left:0;right:0;height:1px;background:rgba(231,156,187,.5);pointer-events:none}
+  .ghost{position:absolute;inset:0;pointer-events:none;opacity:0;transition:.15s}
+  .ghost.on{opacity:.34;mix-blend-mode:screen}
+  .row{display:flex;align-items:center;gap:10px;margin:9px 0}
+  .row label{font-size:12px;color:var(--dim);min-width:62px}
+  input[type=range]{-webkit-appearance:none;appearance:none;flex:1;height:4px;border-radius:2px;
+      background:var(--panel2);outline:none}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:14px;height:14px;
+      border-radius:50%;background:var(--accent);cursor:pointer;border:2px solid #0f1115}
+  .val{font-size:11.5px;color:var(--fg);min-width:52px;text-align:right;
+       font-variant-numeric:tabular-nums}
+  button{background:var(--panel2);color:var(--fg);border:1px solid var(--line);
+      border-radius:8px;padding:7px 13px;font-size:12.5px;cursor:pointer;transition:.15s}
+  button:hover{border-color:var(--accent);color:var(--accent)}
+  button.on{background:var(--accent);border-color:var(--accent);color:#20131a;font-weight:600}
+  .seg{display:flex;gap:6px;flex-wrap:wrap}
+  .strip{display:flex;gap:6px;margin-top:16px;flex-wrap:wrap}
+  .thumb{width:52px;height:52px;border-radius:7px;border:1px solid var(--line);
+      background:#12141a;cursor:pointer;position:relative;overflow:hidden}
+  .thumb canvas{width:48px;height:48px;margin:2px}
+  .thumb.cur{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+  .thumb i{position:absolute;right:3px;bottom:1px;font-size:9.5px;font-style:normal;color:var(--dim)}
+  .thumb.cur i{color:var(--accent)}
+  .thumb.blink{background:#1b1520}
+  .kv{display:grid;grid-template-columns:auto 1fr;gap:5px 12px;font-size:12px}
+  .kv div:nth-child(odd){color:var(--dim)}
+  .kv div:nth-child(even){color:var(--fg);font-variant-numeric:tabular-nums}
+  h2{font-size:13px;margin:0 0 11px;color:var(--accent2);font-weight:600;letter-spacing:.4px}
+  .note{font-size:11.5px;color:var(--dim);line-height:1.75;margin-top:12px}
+  .note em{color:var(--accent);font-style:normal}
+  .pala{display:flex;height:20px;border-radius:5px;overflow:hidden;margin-top:12px}
+  .pala div{flex:1}
+  @media(max-width:900px){.stage{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ksm · 像素2D 受击动画 <span>Hurt</span></h1>
+  <div class="sub">
+    原生像素栅格 <code>64×64</code> · 帧尺寸 <code>76×76</code>（四周留白 6px） ·
+    <code>12</code> 帧循环 @<code>12fps</code> · 受击整体击退 3px · 闭眼帧 [1-9] · 脚底中心为枢轴
+  </div>
+
+  <div class="stage">
+    <div class="card">
+      <div class="viewport checker" id="vp">
+        <div class="stagebox">
+          <canvas id="cv"></canvas>
+          <canvas id="gh" class="ghost"></canvas>
+          <div class="guide" id="guide"></div>
+        </div>
+        <div class="meta">帧 <b id="fi">00</b>/12 &nbsp;·&nbsp; <span id="fmode">受击 · 闭眼</span>
+          &nbsp;·&nbsp; 位移 <span id="fd">0px</span></div>
+      </div>
+      <div class="row">
+        <label>播放</label>
+        <button id="play" class="on">▶ 播放</button>
+        <button id="prev">◀ 上一帧</button>
+        <button id="next">下一帧 ▶</button>
+        <span class="val" id="fpslab">12 fps</span>
+      </div>
+      <div class="row">
+        <label>速度</label>
+        <input type="range" id="fps" min="2" max="24" value="12">
+        <span class="val" id="fpsv">12</span>
+      </div>
+      <div class="row">
+        <label>缩放</label>
+        <input type="range" id="scale" min="2" max="16" value="8">
+        <span class="val" id="scalev">×8</span>
+      </div>
+      <div class="row">
+        <label>当前帧</label>
+        <input type="range" id="scrub" min="0" max="11" value="0">
+      </div>
+      <div class="row">
+        <label>对照</label>
+        <button id="ghostbtn">叠加基准帧</button>
+        <span class="val" style="min-width:auto;color:var(--dim)">(看 3px 受击位移)</span>
+      </div>
+      <div class="row">
+        <label>背景</label>
+        <div class="seg">
+          <button data-bg="checker" class="on">棋盘</button>
+          <button data-bg="dark">深色</button>
+          <button data-bg="light">浅色</button>
+          <button data-bg="grid">网格</button>
+        </div>
+      </div>
+      <div class="strip" id="strip"></div>
+    </div>
+
+    <div class="card">
+      <h2>规格</h2>
+      <div class="kv">
+        <div>原生栅格</div><div>64×64 px</div>
+        <div>单帧单元格</div><div>76 × 76 px</div>
+        <div>帧数 / 时长</div><div>12 帧 / 1.000 s</div>
+        <div>循环</div><div>无缝 (loop)</div>
+        <div>枢轴</div><div>脚底中心 / Bottom Center</div>
+        <div>调色板</div><div id="paln">—</div>
+      </div>
+      <div class="pala" id="pala"></div>
+      <div class="note">
+        <em>受击</em>：躯干+腿整体向左击退 0~3px（腿完全随动，身-腿零错位）+ 屈膝下沉 0~3px；受击 hold 期头向左转头 1px 并缩脖多沉 1px；受击帧 1-9 闭眼（只用原图已有色），末两帧睁眼回位。<br>
+        <em>闭眼</em>：受击帧 1-9 闭眼（只用原图已有色），末两帧睁眼。<br>
+        <em>Unity</em>：Sprite Mode = Multiple，按 Grid By Cell Size 76×76 切片；
+        Filter Mode = Point，Compression = None，Pivot = Bottom Center。
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const SHEET_SRC = "data:image/png;base64,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";
+const FRAMES = 12, CELLW = 76, CELLH = 76, PAD = 6, BLINK = [1, 2, 3, 4, 5, 6, 7, 8, 9];
+const DY = [0, 2, 3, 3, 3, 3, 2, 2, 1, 1, 0, 0];
+const img = new Image();
+let cur = 0, playing = true, fps = 12, scale = 8, bg = "checker";
+
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const gh = document.getElementById('gh');
+const gx = gh.getContext('2d');
+const vp = document.getElementById('vp');
+const guide = document.getElementById('guide');
+
+img.onload = () => {
+  ctx.imageSmoothingEnabled = false;
+  layout(); buildStrip(); buildPalette(); loop(performance.now());
+};
+img.src = SHEET_SRC;
+
+function draw() {
+  ctx.imageSmoothingEnabled = false;
+  ctx.clearRect(0, 0, cv.width, cv.height);
+  ctx.drawImage(img, cur * CELLW, 0, CELLW, CELLH, 0, 0, cv.width, cv.height);
+  gx.clearRect(0, 0, gh.width, gh.height);
+  gx.drawImage(img, 0, 0, CELLW, CELLH, 0, 0, gh.width, gh.height);
+}
+
+function layout() {
+  cv.width = CELLW * scale;
+  cv.height = CELLH * scale;
+  cv.style.width = CELLW * scale + 'px';
+  cv.style.height = CELLH * scale + 'px';
+  gh.width = cv.width; gh.height = cv.height;
+  gh.style.width = cv.style.width; gh.style.height = cv.style.height;
+  guide.style.bottom = (PAD * scale) + 'px';
+  vp.style.minHeight = Math.max(460, CELLH * scale + 40) + 'px';
+  draw();
+}
+
+function buildStrip() {
+  const wrap = document.getElementById('strip');
+  wrap.innerHTML = '';
+  for (let i = 0; i < FRAMES; i++) {
+    const d = document.createElement('div');
+    d.className = 'thumb' + (BLINK.includes(i) ? ' blink' : '');
+    d.innerHTML = '<canvas width="76" height="76"></canvas><i>' + String(i).padStart(2, '0') + '</i>';
+    const c = d.querySelector('canvas');
+    const cx = c.getContext('2d');
+    cx.imageSmoothingEnabled = false;
+    cx.drawImage(img, i * CELLW, 0, CELLW, CELLH, 0, 0, CELLW, CELLH);
+    d.onclick = () => { cur = i; playing = false; sync(); };
+    wrap.appendChild(d);
+  }
+  markStrip();
+}
+function markStrip() {
+  [...document.querySelectorAll('.thumb')].forEach((d, i) => d.classList.toggle('cur', i === cur));
+}
+function buildPalette() {
+  const hex = [[0, 0, 0], [52, 56, 76], [57, 27, 22], [71, 39, 118], [74, 178, 255], [109, 67, 57], [118, 68, 68], [145, 87, 189], [151, 114, 100], [170, 51, 54], [170, 110, 102], [189, 15, 26], [193, 74, 255], [194, 203, 208], [210, 164, 148], [213, 156, 227], [216, 155, 151], [222, 87, 91], [242, 210, 207], [255, 230, 74], [255, 255, 255]];
+  document.getElementById('pala').innerHTML = hex.map(h => '<div style="background:' + h + '"></div>').join('');
+  const n = document.getElementById('paln');
+  if (n) n.textContent = hex.length + ' 色';
+}
+
+function sync() {
+  cur = (cur + FRAMES) % FRAMES;
+  document.getElementById('fi').textContent = String(cur).padStart(2, '0');
+  document.getElementById('fmode').textContent = BLINK.includes(cur) ? '闭眼' : '受击 · 闭眼';
+  document.getElementById('fd').textContent = (DY[cur] ? '+1' : '0') + 'px';
+  document.getElementById('scrub').value = cur;
+  draw(); markStrip();
+}
+
+let acc = 0, last = 0;
+function loop(t) {
+  requestAnimationFrame(loop);
+  if (!last) { last = t; return; }
+  const dt = t - last; last = t;
+  if (!playing) return;
+  acc += dt;
+  const step = 1000 / fps;
+  while (acc >= step) { acc -= step; cur = (cur + 1) % FRAMES; sync(); }
+}
+
+document.getElementById('play').onclick = e => {
+  playing = !playing; e.target.classList.toggle('on', playing);
+  e.target.textContent = playing ? '▶ 播放' : '❚❚ 暂停';
+};
+document.getElementById('prev').onclick = () => { playing = false; document.getElementById('play').classList.remove('on'); document.getElementById('play').textContent = '▶ 播放'; cur--; sync(); };
+document.getElementById('next').onclick = () => { playing = false; document.getElementById('play').classList.remove('on'); document.getElementById('play').textContent = '▶ 播放'; cur++; sync(); };
+document.getElementById('fps').oninput = e => { fps = +e.target.value; document.getElementById('fpsv').textContent = fps; document.getElementById('fpslab').textContent = fps + ' fps'; };
+document.getElementById('scale').oninput = e => {
+  scale = +e.target.value; document.getElementById('scalev').textContent = '×' + scale;
+  layout();
+};
+document.getElementById('scrub').oninput = e => { playing = false; cur = +e.target.value; sync(); };
+document.getElementById('ghostbtn').onclick = e => {
+  const on = gh.classList.toggle('on');
+  e.target.classList.toggle('on', on);
+  e.target.textContent = on ? '关闭基准帧' : '叠加基准帧';
+};
+document.querySelectorAll('[data-bg]').forEach(b => b.onclick = () => {
+  bg = b.dataset.bg;
+  vp.className = 'viewport ' + bg;
+  document.querySelectorAll('[data-bg]').forEach(x => x.classList.toggle('on', x === b));
+});
+window.addEventListener('keydown', e => {
+  if (e.key === ' ') { e.preventDefault(); document.getElementById('play').click(); }
+  if (e.key === 'ArrowRight') document.getElementById('next').click();
+  if (e.key === 'ArrowLeft') document.getElementById('prev').click();
+});
+</script>
+</body>
+</html>
