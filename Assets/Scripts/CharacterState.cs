@@ -34,9 +34,14 @@ using UnityEngine;
 /// 敌人若希望「每次被打都生效」，把 invincibleTime 设为 0。
 ///
 /// 全局无敌（闪避无敌帧）：
-/// 与按来源无敌相互独立——<see cref="SetGlobalInvincible"/> 开启的持续时间内免疫**所有来源、
-/// 所有形式**的伤害（连无来源的绝对伤害也一并挡掉），到点自动解除，不依赖外部调用收尾。
-/// 由 PlayerController 在闪避开始时按闪避时长开启（<see cref="PlayerController.RequestDodge"/>）。
+/// 与按来源无敌相互独立，共两条互不相同的路径——
+/// 1. **持有型**（闪避专用，<see cref="HoldGlobalInvincible"/>）：纯开关、无计时器。
+///    PlayerController 在闪避开始时持有、IsDodging 结束瞬间同步解除——无敌帧就是
+///    「闪避进行中」本身，与闪避状态同生同灭，不存在两个倒计时源的帧级不同步。
+/// 2. **计时器型**（<see cref="SetGlobalInvincible"/>，预留）：duration 秒内免疫所有来源、
+///    所有形式的伤害（连无来源的绝对伤害也一并挡掉），到点自动解除，不依赖外部调用收尾。
+///    留给将来的技能 / 道具 / 过场，**闪避不走这条路**。
+/// 两条路径互不影响，与按来源无敌字典三者彻底分离，结构上不可能共用同一个计时器。
 ///
 /// 蹲下状态由 PlayerController 每帧通过 <see cref="SetCrouching"/> 同步（本组件不反向查询控制器）。
 /// 上限 / 恢复量的成长接口见文件末尾「成长扩展点」（占位，逻辑留空）。
@@ -110,11 +115,21 @@ public class CharacterState : MonoBehaviour
     private readonly List<int> activeSources = new List<int>();
 
     /// <summary>
-    /// 全局无敌剩余时间（秒）：&gt; 0 时免疫所有来源、所有形式的伤害（闪避无敌帧）。
+    /// 全局无敌剩余时间（秒）：&gt; 0 时免疫所有来源、所有形式的伤害（计时器型全局无敌）。
     /// 与按来源无敌相互独立，两者互不影响；由 <see cref="SetGlobalInvincible"/> 开启，
     /// 每帧倒计时，到点自动归零（见 <see cref="Update"/>）。
+    /// 注意：**闪避无敌帧不走这条路**（闪避用 <see cref="globalInvincibleHold"/> 持有型开关），
+    /// 计时器型留给将来的技能 / 道具。
     /// </summary>
     private float globalInvincibleTimer;
+
+    /// <summary>
+    /// 持有型全局无敌（闪避无敌帧专用）：纯开关，无计时器、无时长参数。
+    /// true 期间免疫所有来源、所有形式的伤害；由 PlayerController 在闪避期间持有、
+    /// 闪避结束（IsDodging = false）瞬间同步解除——无敌帧与闪避状态同生同灭。
+    /// 与 <see cref="globalInvincibleTimer"/>（计时器型）、按来源无敌字典三套机制相互独立。
+    /// </summary>
+    private bool globalInvincibleHold;
 
     private void Awake()
     {
@@ -212,13 +227,31 @@ public class CharacterState : MonoBehaviour
 
     // ───────────────────────── 全局无敌（闪避无敌帧） ─────────────────────────
 
-    /// <summary>是否处于全局无敌（闪避无敌帧期间）：免疫所有来源的伤害。</summary>
-    public bool IsGloballyInvincible => globalInvincibleTimer > 0f;
+    /// <summary>
+    /// 是否处于全局无敌：持有型开关（闪避）或计时器型（技能 / 道具）任一命中即免疫所有来源的伤害。
+    /// 三个 TakeDamage 入口统一走本判断，无需各自分支。
+    /// </summary>
+    public bool IsGloballyInvincible => globalInvincibleHold || globalInvincibleTimer > 0f;
 
     /// <summary>
-    /// 开启一段全局无敌（闪避无敌帧）：duration 秒内免疫所有来源、所有形式的伤害
+    /// 持有 / 解除持有型全局无敌（**闪避无敌帧专用**，不用计时器）。
+    /// hold = true：持有期间无法掉血——免疫所有来源、所有形式的伤害（不扣血、不触发事件、
+    /// 不给来源挂冷却）；hold = false：立即解除。
+    /// 由 PlayerController 驱动：闪避开始（<see cref="PlayerController.RequestDodge"/>）时置 true，
+    /// 闪避结束（IsDodging = false）瞬间置 false——无敌帧与闪避状态严格同生同灭，
+    /// 玩家在闪避过程中不可能掉血，闪避一结束立刻恢复可受伤。
+    /// </summary>
+    public void HoldGlobalInvincible(bool hold)
+    {
+        globalInvincibleHold = hold;
+    }
+
+    /// <summary>
+    /// 开启一段计时器型全局无敌：duration 秒内免疫所有来源、所有形式的伤害
     /// （不扣血、不触发事件、不给来源挂冷却）。持续调用会刷新剩余时间；
     /// duration &lt;= 0 等价于立即解除（见 <see cref="ClearGlobalInvincibility"/>）。
+    /// 预留给技能 / 道具 / 过场；**闪避无敌帧请用 <see cref="HoldGlobalInvincible"/>**，
+    /// 两条路径互不影响。
     /// </summary>
     public void SetGlobalInvincible(float duration)
     {
@@ -313,7 +346,8 @@ public class CharacterState : MonoBehaviour
         if (amount <= 0f || IsDead)
             return;
 
-        if (globalInvincibleTimer > 0f)
+        // 全局无敌（含闪避持有型开关）：连无来源的绝对伤害也一并免疫。
+        if (IsGloballyInvincible)
             return;
 
         ApplyDamage(amount);
@@ -349,8 +383,8 @@ public class CharacterState : MonoBehaviour
         if (amount <= 0f || IsDead)
             return false;
 
-        // 全局无敌（闪避无敌帧）：拒绝一切战斗伤害——不扣血、不触发事件、不给来源挂冷却。
-        if (globalInvincibleTimer > 0f)
+        // 全局无敌（闪避持有型开关或计时器型）：拒绝一切战斗伤害——不扣血、不触发事件、不给来源挂冷却。
+        if (IsGloballyInvincible)
             return false;
 
         if (source == null)
@@ -411,6 +445,7 @@ public class CharacterState : MonoBehaviour
         IsDead = false;
         invincibilityTimers.Clear();
         globalInvincibleTimer = 0f;
+        globalInvincibleHold = false;
 
         if (hpChanged)
             HealthChanged?.Invoke(CurrentHP, maxHP);

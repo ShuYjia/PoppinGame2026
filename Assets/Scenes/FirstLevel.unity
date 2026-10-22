@@ -2143,8 +2143,8 @@ MonoBehaviour:
   velocityY: 0
   crouchHeightMultiplier: 0.55
   ceilingCheckPadding: 0.03
-  dodgeSpeed: 20
-  dodgeDuration: 0.03
+  dodgeSpeed: 14
+  dodgeDuration: 0.28
   dodgeCooldown: 0.6
   attackCooldown: 0.4
   attackDuration: 0.375

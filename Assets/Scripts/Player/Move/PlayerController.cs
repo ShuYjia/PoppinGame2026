@@ -35,12 +35,16 @@ using UnityEngine.InputSystem;
 ///    Dodge 触发器进入 sprint 片段，该片段同时驱动子物体 "Sprite Mask/111_export-export"
 ///    的激活与后滑特效；冲刺期间锁定水平速度并暂停常规动画参数，结束后进入冷却。
 ///    冲刺距离 ≈ dodgeSpeed × dodgeDuration，两者均可在 Inspector 中调整；dodgeDuration
-///    刻意短于 sprint 片段长度，冲刺结束后角色在冲刺姿势中惯性滑行至停止、片段照常播完。
+///    与 sprint 片段等长（≈0.28s），位移与动画同生同灭——时长短于片段会让角色在冲刺姿势中
+///    空滑（动画没播完人停了），长于片段会让角色以冲刺速度幽灵滑行（动画播完了人还在动），
+///    两者都会明显手感发糊，调 dodgeDuration 时优先对齐片段长度。
 ///    玩家本身只用 SpriteRenderer.flipX 翻转、不会镜像子物体，因此向左冲刺时会：把特效
 ///    根物体（同时是 SpriteMask 遮罩窗口）镜像到玩家左侧、用 flipX 翻转特效贴图、并在
 ///    LateUpdate（晚于动画写入）把特效子物体的水平位移取反，使特效整体镜像到另一侧，
 ///    保证特效始终出现在冲刺方向的后方（实现在 PlayerAnimatorView）。
-///    无敌帧尚未实装——待受伤系统实现时，在 IsDodging 为真期间屏蔽伤害（已预留）。
+///    无敌帧为持有型开关（CharacterState.HoldGlobalInvincible）：闪避开始持有、
+///    IsDodging 结束瞬间同步解除——闪避过程中无法掉血，不用计时器判断，
+///    与受伤后的按来源无敌（字典计时）彻底分离、结构上不可能共用计时器。
 /// 8. 普通攻击（J / 手柄北键 △）：触发 ksm.controller 的 normalAttack 片段，并在角色前方
 ///    发射一枚音波（纯表现：飞行、撞墙/超时消失，无伤害；体力消耗见第 9 条）。攻击效果窗口
 ///    （attackDuration）内移动速度按 attackMoveMultiplier 降低（不锁定）。
@@ -356,6 +360,10 @@ public class PlayerController : MonoBehaviour
     {
         if (inputControl != null)
             inputControl.Disable();
+        // 兜底：闪避中组件被禁用 / 场景切换时解除无敌持有，防止带着永久无敌离开。
+        // state 是 Unity 对象，已销毁时 != 判定为 false，不会取已销毁对象的成员。
+        if (state != null)
+            state.HoldGlobalInvincible(false);
     }
 
     private void OnDestroy()
@@ -439,6 +447,9 @@ public class PlayerController : MonoBehaviour
             {
                 IsDodging = false;
                 dodgeCooldownTimer = dodgeCooldown;
+                // 无敌帧与闪避状态同生同灭：闪避结束的同一物理帧解除持有（非计时器，立即生效）。
+                if (state != null)
+                    state.HoldGlobalInvincible(false);
             }
         }
 
@@ -576,8 +587,9 @@ public class PlayerController : MonoBehaviour
     /// <summary>
     /// 请求一次闪避：不在冲刺中、冷却结束且体力足够时生效。方向取当前水平输入（超过死区），
     /// 否则取当前朝向；触发 Animator 的 Dodge 触发器进入 sprint 片段。
-    /// 冲刺期间携带无敌帧：免疫所有来源的伤害，时长与冲刺同步（= dodgeDuration，
-    /// Inspector 调闪避时长时无敌帧自动跟随，状态组件内部按真实时间倒计时、到点自解）。
+    /// 冲刺期间携带无敌帧：进入冲刺即持有全局无敌（<see cref="CharacterState.HoldGlobalInvincible"/>
+    /// 置 true），IsDodging 结束瞬间同步解除——闪避过程中无法掉血，不用计时器判断；
+    /// Inspector 调 dodgeDuration 时无敌帧随闪避状态自动跟随（两者同生同灭）。
     /// 体力门控放在起身判定之前：被拒绝时没有任何状态变化（不起身、不进冷却、不变朝向）。
     /// 供 Update 的输入采样调用，将来的技能系统也可直接调用。
     /// </summary>
@@ -617,10 +629,10 @@ public class PlayerController : MonoBehaviour
         IsDodging = true;
         dodgeTimer = dodgeDuration;
 
-        // 闪避无敌帧：整个冲刺期间免疫所有来源的伤害。与冲刺共用 dodgeDuration，
-        // Inspector 调整闪避时长时无敌帧自动同步（CharacterState 内部按真实时间倒计时）。
+        // 闪避无敌帧：持有型开关（非计时器）——冲刺期间无法掉血，
+        // IsDodging 结束瞬间在 FixedUpdate 同一处同步解除，两者严格同生同灭。
         if (state != null)
-            state.SetGlobalInvincible(dodgeDuration);
+            state.HoldGlobalInvincible(true);
 
         if (animatorView != null)
             animatorView.TriggerDodge();
