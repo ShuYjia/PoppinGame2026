@@ -11,6 +11,7 @@ using UnityEngine;
 ///   播完接 crouchIdle（蹲姿摆动循环）；false 时回 idle。
 /// - Dodge(Trigger)：闪避，AnyState → sprint。
 /// - Attack(Trigger)：普通攻击，AnyState → normalAttack（仅地面攻击触发，见 PlayerController）。
+/// - hurt(Trigger)：受伤，HurtLayer（Override 层，权重 1）的 New State → 受伤状态，播完自动回空状态。
 ///
 /// velocityY、isGround 与 IsCrouching 必须每帧都写：漏写时混合树会停在默认值 velocityY = 0（最高点姿势），
 /// 而 isGround 一直是 false 时角色永远不会从空中状态落回；IsCrouching 漏写则蹲下动画不触发。
@@ -44,6 +45,9 @@ public class PlayerAnimatorView : MonoBehaviour
 
     /// <summary>Animator 的 Attack 触发器哈希（ksm.controller 中新增的参数）。</summary>
     private static readonly int AttackParam = Animator.StringToHash("Attack");
+
+    /// <summary>Animator 的 hurt 触发器哈希（ksm.controller 中新增的参数）：AnyState → HurtLayer 的受伤状态。</summary>
+    private static readonly int HurtParam = Animator.StringToHash("hurt");
 
     private const string DodgeEffectRootName = "Sprite Mask";    // 闪避特效根物体（SpriteMask 遮罩窗口 + 特效之父）
     private const string DodgeEffectName = "111_export-export"; // 闪避特效子物体（sprint 片段驱动其激活与位移）
@@ -116,6 +120,19 @@ public class PlayerAnimatorView : MonoBehaviour
     {
         if (animator != null)
             animator.SetTrigger(AttackParam);
+    }
+
+    /// <summary>
+    /// 触发一次受伤（ksm.controller 的 hurt 触发器 → HurtLayer 的受伤状态）。
+    /// 由同物体 CharacterState 的 OnTakeDamage 事件驱动（Inspector 里挂的监听，
+    /// 与 PlayerController.GetHurt 并列）——只有真正扣到血的伤害才会触发它。
+    /// 硬直的解除不归本组件管：受伤动画播完时由状态上的 HurtAnimation 回调 PlayerController.EndHurt。
+    /// 触发器在未播放受伤状态时重复设置没有副作用（会被下一次求值消费掉）。
+    /// </summary>
+    public void PlayHurt()
+    {
+        if (animator != null)
+            animator.SetTrigger(HurtParam);
     }
 
     // ───────────────────────────── 表现层 ─────────────────────────────
