@@ -1053,11 +1053,18 @@ public class PlayerController : MonoBehaviour
     public void GetHurt(Transform attacker)
     {
         // 硬直中忽略重入：保证一次受击只播一遍动画、只击退一次（见上方注释）。
-        if (rb == null || IsHurt)
+        if (IsHurt)
             return;
 
+        // 先把"已进入硬直"记下来，再做后面的击退。
+        // 顺序很重要：OnTakeDamage 的两条监听里 PlayHurt 在前、GetHurt 在后，
+        // 硬直标记必须在本方法里就建立起来，否则重复注册的监听会绕过 IsHurt 判断，
+        // 造成动画播两遍 / 击退叠加。rb 缺失只是没法击退，硬直本身照样要生效。
         IsHurt = true;
         hurtTimer = hurtDuration;
+
+        if (rb == null)
+            return;
 
         // 击退方向：背离攻击者。两者 X 重合（贴身命中）或攻击者已被销毁时方向算不出来，
         // 退化成背对当前朝向——保证「挨打一定会被推开」，不会静默变成没有击退。
