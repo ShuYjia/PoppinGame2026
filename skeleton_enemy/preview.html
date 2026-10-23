@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="zh-CN"><head><meta charset="utf-8">
+<title>骷髅小怪 - 动画预览</title>
+<style>
+ body{margin:0;font:14px/1.6 system-ui,sans-serif;background:#1d1a24;color:#e8e2cc}
+ header{padding:12px 20px;border-bottom:1px solid #3a3346}
+ header h1{margin:0;font-size:17px} header p{margin:2px 0 0;color:#9a9284;font-size:12px}
+ #stage{display:flex;flex-direction:column;align-items:center;gap:14px;padding:26px}
+ #view{image-rendering:pixelated;background-size:18px 18px;
+   background-image:linear-gradient(45deg,#2a2634 25%,transparent 25%),
+   linear-gradient(-45deg,#2a2634 25%,transparent 25%),
+   linear-gradient(45deg,transparent 75%,#2a2634 75%),
+   linear-gradient(-45deg,transparent 75%,#2a2634 75%);
+   background-position:0 0,0 9px,9px -9px,-9px 0}
+ #view.bg-dark{background:#141218;background-image:none}
+ #view.bg-light{background:#d8d2c0;background-image:none}
+ #view{width:calc(var(--s)*32px);height:calc(var(--s)*36px);
+   background-repeat:no-repeat;background-position:center center}
+ .row{display:flex;gap:8px;flex-wrap:wrap;justify-content:center}
+ button{background:#2a2634;color:#e8e2cc;border:1px solid #4a4356;border-radius:6px;
+   padding:5px 14px;cursor:pointer;font-size:13px}
+ button.on{background:#6fd3ff;color:#141218;border-color:#6fd3ff;font-weight:600}
+ #info{color:#9a9284;font-size:12px}
+</style></head><body>
+<header><h1>骷髅小怪 (skeleton_enemy)</h1>
+<p>28x32 原生 / 32x36 帧 / 12fps / pivot 脚底中心 / PPU 15 建议</p></header>
+<div id="stage">
+ <div id="view" class="bg-checker"></div>
+ <div class="row" id="anims"></div>
+ <div class="row">
+  <button id="play">暂停</button>
+  <button id="prev">上一帧</button><button id="next">下一帧</button>
+  <button id="b1">深底</button><button id="b2">棋盘</button><button id="b3">浅底</button>
+ </div>
+ <div class="row"><span id="info"></span></div>
+</div>
+<script>
+const ANIMS = [{"name": "idle", "sheet": "skeleton_idle_sheet.png", "frames": 24, "dur": 2000}, {"name": "walk", "sheet": "skeleton_walk_sheet.png", "frames": 8, "dur": 667}, {"name": "attack", "sheet": "skeleton_attack_sheet.png", "frames": 6, "dur": 500}, {"name": "hurt", "sheet": "skeleton_hurt_sheet.png", "frames": 4, "dur": 333}, {"name": "death", "sheet": "skeleton_death_sheet.png", "frames": 10, "dur": 833}];
+let cur=0, frame=0, playing=true, timer=null;
+const view=document.getElementById('view'), info=document.getElementById('info');
+function cssScale(){ return matchMedia('(max-width:640px)').matches?4:8; }
+function setup(a){
+  const s=cssScale();
+  view.style.setProperty('--s',s);
+  view.style.backgroundImage='url('+encodeURIComponent(a.sheet)+')';
+  view.style.backgroundSize=(a.frames*32*s)+'px '+(36*s)+'px';
+  view.style.backgroundRepeat='no-repeat'; view.style.backgroundPosition='0 0';
+  document.querySelectorAll('#anims button').forEach((b,i)=>b.classList.toggle('on',i===cur));
+  draw();
+}
+function draw(){
+  const a=ANIMS[cur], s=cssScale();
+  view.style.backgroundPosition=(-frame*32*s)+'px 0';
+  info.textContent=a.name+'  第 '+String(frame).padStart(2,'0')+' / '+a.frames+' 帧  ('+a.dur+'ms/循环)';
+}
+function tick(){
+  if(!playing) return;
+  frame=(frame+1)%ANIMS[cur].frames; draw();
+}
+ANIMS.forEach((a,i)=>{
+  const b=document.createElement('button'); b.textContent=a.name;
+  b.onclick=()=>{cur=i;frame=0;setup(a)}; document.getElementById('anims').appendChild(b);
+});
+document.getElementById('play').onclick=e=>{playing=!playing;e.target.textContent=playing?'暂停':'播放'};
+document.getElementById('prev').onclick=()=>{playing=false;document.getElementById('play').textContent='播放';
+  frame=(frame-1+ANIMS[cur].frames)%ANIMS[cur].frames;draw()};
+document.getElementById('next').onclick=()=>{playing=false;document.getElementById('play').textContent='播放';
+  frame=(frame+1)%ANIMS[cur].frames;draw()};
+document.getElementById('b1').onclick=()=>view.className='bg-dark';
+document.getElementById('b2').onclick=()=>view.className='bg-checker';
+document.getElementById('b3').onclick=()=>view.className='bg-light';
+setup(ANIMS[0]); timer=setInterval(tick, Math.round(1000/12));
+</script></body></html>

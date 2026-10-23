@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>ksm 死亡动画 v2 — 预览</title>
+<style>
+  :root { --bg:#1b1d22; --fg:#e8e8ea; --dim:#9aa0aa; --line:#33363d; }
+  body { margin:0; background:var(--bg); color:var(--fg);
+         font:14px/1.6 "Microsoft YaHei", system-ui, sans-serif; padding:28px 32px 60px; }
+  h1 { font-size:20px; margin:0 0 4px; }
+  .sub { color:var(--dim); margin-bottom:22px; }
+  section { margin:26px 0; }
+  h2 { font-size:15px; margin:0 0 10px; color:#cfd3d9;
+       border-left:3px solid #6ba4ff; padding-left:8px; }
+  img { image-rendering: pixelated; max-width:100%; display:block; }
+  .chk { background:#2a2d34; }
+  .row { display:flex; flex-wrap:wrap; gap:6px; }
+  .cell { background:var(--chk,#2a2d34); border:1px solid var(--line); }
+  .cell img { width:114px; height:114px; }
+  table { border-collapse:collapse; }
+  td, th { border:1px solid var(--line); padding:5px 10px; text-align:left; }
+  th { background:#23262c; color:#cfd3d9; font-weight:500; }
+  code { background:#23262c; padding:1px 5px; border-radius:3px; }
+  .note { color:var(--dim); font-size:13px; }
+</style>
+</head>
+<body>
+<h1>ksm 死亡动画 v2<span style="color:#9aa0aa;font-weight:400"> — 官方角色重演（角色取自 12.png，动作取自 ksm_death 序列）</span></h1>
+<div class="sub">16 帧 @ 12fps · 一次性不循环（≈1.33s）· 原生 64×64 / cell 76×76 · 21 色官方调色板 · 透明背景</div>
+
+<section>
+  <h2>动图预览（×6，为便于审查设为循环播放）</h2>
+  <img src="ksm_death2.gif" alt="death gif">
+</section>
+
+<section>
+  <h2>16 帧总览（4×4，×6）</h2>
+  <img src="ksm_death2_16frames_x6.png" alt="16 frames">
+</section>
+
+<section>
+  <h2>逐帧（含帧号，背景为棋盘以显示透明）</h2>
+  <div class="row" id="frames"></div>
+  <p class="note">帧 01=官方帧原样 · 02-05 渐进蜷缩（头持续右下低） · 06-07 伏倒定格（头深低）×2 · 08 翻身弓身 · 09-10 仰面躺平 ×2 · 11-16 魂魄星星向左上飘</p>
+</section>
+
+<section>
+  <h2>横条图集（Unity 切图用，×4）</h2>
+  <img src="ksm_death2_sheet_x4.png" alt="sheet">
+</section>
+
+<section>
+  <h2>官方调色板（21 色，全序列统一）</h2>
+  <img src="ksm_death2_palette.png" alt="palette">
+</section>
+
+<section>
+  <h2>规格</h2>
+  <table>
+    <tr><th>原生栅格</th><td>64 × 64（与 12.png 同格，块宽 10px）</td></tr>
+    <tr><th>帧单元格</th><td>76 × 76（padding 6，与 ksm_hurt_pixel 一致）</td></tr>
+    <tr><th>帧数 / 帧率</th><td>16 @ 12fps，loop=false</td></tr>
+    <tr><th>枢轴</th><td>Bottom Center（cell 内 38, 69）</td></tr>
+    <tr><th>alpha</th><td>二值 0/255，透明背景</td></tr>
+    <tr><th>Unity</th><td>Sprite Mode=Multiple，Grid By Cell Size=76×76，Filter=Point，Compression=None</td></tr>
+  </table>
+</section>
+
+<script>
+  var box = document.getElementById('frames');
+  for (var i = 0; i < 16; i++) {
+    var d = document.createElement('div');
+    d.className = 'cell';
+    d.style.background =
+      'conic-gradient(#2a2d34 0 25%, #343841 0 50%, #2a2d34 0 75%, #343841 0) 0 0/12px 12px';
+    var t = document.createElement('div');
+    t.className = 'note';
+    t.style.cssText = 'padding:2px 4px;background:#23262c;border-bottom:1px solid #33363d';
+    t.textContent = String(i + 1).padStart(2, '0');
+    var img = document.createElement('img');
+    img.src = 'frames/ksm_death2_' + String(i).padStart(2, '0') + '.png';
+    d.appendChild(t); d.appendChild(img); box.appendChild(d);
+  }
+</script>
+</body>
+</html>

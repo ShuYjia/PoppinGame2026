@@ -1,0 +1,345 @@
+{
+  "name": "skeleton_enemy",
+  "display_name": "骷髅小怪 (Skeleton)",
+  "type": "enemy",
+  "authoring": "original pixel art (procedural, not upscaled from reference)",
+  "native_size": [
+    28,
+    32
+  ],
+  "frame_size": [
+    32,
+    36
+  ],
+  "padding": 2,
+  "fps": 12,
+  "pivot": {
+    "x": 16.0,
+    "y": 34,
+    "note": "脚底中心，向上为 -y；内容底边在帧内 y=34"
+  },
+  "palette_count": 12,
+  "palette": {
+    "B": [
+      232,
+      226,
+      204
+    ],
+    "L": [
+      255,
+      253,
+      242
+    ],
+    "S": [
+      185,
+      176,
+      154
+    ],
+    "D": [
+      126,
+      118,
+      99
+    ],
+    "k": [
+      27,
+      24,
+      34
+    ],
+    "f": [
+      111,
+      211,
+      255
+    ],
+    "F": [
+      234,
+      251,
+      255
+    ],
+    "d": [
+      42,
+      134,
+      200
+    ],
+    "#": [
+      36,
+      31,
+      43
+    ],
+    "w": [
+      255,
+      255,
+      255
+    ],
+    "x": [
+      214,
+      214,
+      226
+    ],
+    "y": [
+      150,
+      150,
+      170
+    ]
+  },
+  "layers": {
+    "leg_l": 15,
+    "leg_r": 15,
+    "body": 102,
+    "arm_l": 24,
+    "arm_r": 24,
+    "head": 150
+  },
+  "anims": {
+    "idle": {
+      "file": "skeleton_idle_sheet.png",
+      "frames": 24,
+      "fps": 12,
+      "loop_duration_sec": 2.0,
+      "motion": {
+        "body_vertical_offset_px": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          1,
+          1,
+          1,
+          1,
+          2,
+          2,
+          2,
+          2,
+          2,
+          2,
+          1,
+          1,
+          1,
+          1,
+          0,
+          0,
+          0,
+          0
+        ],
+        "head_lag_frames": 1,
+        "flame_period_frames": 8,
+        "legs": "static",
+        "horizontal_offset_px": 0
+      }
+    },
+    "walk": {
+      "file": "skeleton_walk_sheet.png",
+      "frames": 8,
+      "fps": 12,
+      "loop_duration_sec": 0.667,
+      "motion": {
+        "leg_dx": [
+          [
+            0,
+            1,
+            2,
+            1,
+            0,
+            -1,
+            -2,
+            -1
+          ],
+          [
+            0,
+            -1,
+            -2,
+            -1,
+            0,
+            1,
+            2,
+            1
+          ]
+        ],
+        "leg_lift_px": [
+          [
+            -1,
+            -1,
+            0,
+            -1,
+            -1,
+            -1,
+            0,
+            -1
+          ],
+          [
+            -1,
+            -1,
+            0,
+            -1,
+            -1,
+            -1,
+            0,
+            -1
+          ]
+        ],
+        "body_bob_px": [
+          1,
+          0,
+          0,
+          1,
+          1,
+          0,
+          0,
+          1
+        ],
+        "arm_counter_swing": true
+      }
+    },
+    "attack": {
+      "file": "skeleton_attack_sheet.png",
+      "frames": 6,
+      "fps": 12,
+      "loop_duration_sec": 0.5,
+      "motion": {
+        "hand_positions": [
+          [
+            21,
+            24
+          ],
+          [
+            22,
+            20
+          ],
+          [
+            23,
+            17
+          ],
+          [
+            24,
+            23
+          ],
+          [
+            22,
+            25
+          ],
+          [
+            21,
+            24
+          ]
+        ],
+        "body_dy": [
+          0,
+          -1,
+          -1,
+          1,
+          1,
+          0
+        ],
+        "head_dy": [
+          0,
+          -1,
+          -2,
+          1,
+          1,
+          0
+        ],
+        "note": "arm_r 为程序化绘制（Bresenham 2px 粗 + 3 指爪）"
+      }
+    },
+    "hurt": {
+      "file": "skeleton_hurt_sheet.png",
+      "frames": 4,
+      "fps": 12,
+      "loop_duration_sec": 0.333,
+      "motion": {
+        "knockback_px": [
+          -1,
+          -2,
+          -1,
+          0
+        ],
+        "flash_white_frames": [
+          0,
+          1
+        ]
+      }
+    },
+    "death": {
+      "file": "skeleton_death_sheet.png",
+      "frames": 10,
+      "fps": 12,
+      "loop_duration_sec": 0.833,
+      "motion": {
+        "head": [
+          [
+            0,
+            0,
+            1,
+            1,
+            0,
+            -1,
+            -1,
+            0,
+            1,
+            1
+          ],
+          [
+            0,
+            -1,
+            -2,
+            -2,
+            -1,
+            0,
+            1,
+            2,
+            4,
+            6
+          ]
+        ],
+        "body": [
+          [
+            0,
+            0,
+            0,
+            -1,
+            -1,
+            -1,
+            -1,
+            0,
+            0,
+            0
+          ],
+          [
+            0,
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            7
+          ]
+        ],
+        "legs_spread_px": [
+          0,
+          0,
+          -1,
+          -1,
+          -2,
+          -2,
+          -3,
+          -3,
+          -3,
+          -3
+        ],
+        "flame_out_at_frame": 3
+      }
+    }
+  },
+  "unity_recommended": {
+    "sprite_mode": "Multiple (按 32x36 网格切)",
+    "pixels_per_unit": 15,
+    "filter_mode": "Point (no filter)",
+    "compression": "None",
+    "pivot": "Bottom Center",
+    "note": "PPU 15 与 ksm 一致 -> 世界高约 2.13 单位（ksm 为 2.4）"
+  }
+}
