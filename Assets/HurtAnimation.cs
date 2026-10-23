@@ -15,6 +15,8 @@ public class HurtAnimation : StateMachineBehaviour
 {
     /// <summary>
     /// 受伤状态结束（动画播完、开始退回默认空状态）时调用：解除玩家硬直，恢复操作。
+    /// 注意这里是「退出」，所以调的是 EndHurt 而不是把 IsHurt 置真——
+    /// 置真会把玩家永久锁死（IsHurt 是 private set，外部也改不了，只能走 EndHurt）。
     /// 取不到 PlayerController（挂在别的 Animator 上）时静默跳过，不报错。
     /// </summary>
     public override void OnStateExit(Animator animator, AnimatorStateInfo stateInfo, int layerIndex)
