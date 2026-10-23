@@ -1042,11 +1042,18 @@ public class PlayerController : MonoBehaviour
     /// 竖直方向照常走重力与下落限制（空中被打继续往下掉，不悬停）。
     /// 解除走三条路径取其先到：① 受伤动画播完（HurtAnimation.OnStateExit → <see cref="EndHurt"/>）；
     /// ② 兜底计时 hurtDuration 到期；③ 组件禁用 / 场景切换（OnDisable）。
+    ///
+    /// **硬直中重复进入会被忽略**（下面的 IsHurt 早退）：否则一次受击会播两遍受伤动画、
+    /// 击退也会更远——hurt 是 Trigger，硬直中再 SetTrigger 会留在队列里，等本次动画退场后
+    /// 又被消费一次；同时 hurtTimer 被重置会让滑行时长翻倍（玩家线性阻尼为 0，
+    /// 滑行距离 ∝ 硬直时长）。要「每次受击都有反馈」请调 <see cref="CharacterState.invincibleTime"/>，
+    /// 而不是在这里放行重入。
     /// </summary>
     /// <param name="attacker">攻击者（伤害来源）的 Transform；null 时无法算方向，退化为「背对当前朝向」推开。</param>
     public void GetHurt(Transform attacker)
     {
-        if (rb == null)
+        // 硬直中忽略重入：保证一次受击只播一遍动画、只击退一次（见上方注释）。
+        if (rb == null || IsHurt)
             return;
 
         IsHurt = true;

@@ -127,12 +127,20 @@ public class PlayerAnimatorView : MonoBehaviour
     /// 由同物体 CharacterState 的 OnTakeDamage 事件驱动（Inspector 里挂的监听，
     /// 与 PlayerController.GetHurt 并列）——只有真正扣到血的伤害才会触发它。
     /// 硬直的解除不归本组件管：受伤动画播完时由状态上的 HurtAnimation 回调 PlayerController.EndHurt。
-    /// 触发器在未播放受伤状态时重复设置没有副作用（会被下一次求值消费掉）。
+    ///
+    /// **硬直中不重复触发**：hurt 是 Trigger 参数，在受伤状态播放途中再 SetTrigger 不会被立刻消费，
+    /// 而是留在队列里，等本次动画退场回默认空状态后才被 <c>New State → ksmHurt2</c> 过渡消费 →
+    /// 动画再播一遍。所以这里直接忽略重入（GetHurt 侧同样有 IsHurt 早退，双保险）。
     /// </summary>
     public void PlayHurt()
     {
-        if (animator != null)
-            animator.SetTrigger(HurtParam);
+        if (animator == null)
+            return;
+
+        if (controller != null && controller.IsHurt)
+            return;
+
+        animator.SetTrigger(HurtParam);
     }
 
     // ───────────────────────────── 表现层 ─────────────────────────────
