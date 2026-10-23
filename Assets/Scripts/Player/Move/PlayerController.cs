@@ -58,8 +58,14 @@ using UnityEngine.InputSystem;
 ///    对应动作整个不发生（不部分扣除、不进冷却）。
 ///    SP 由 CharacterState 每帧自动恢复（spRegenPerFrame），蹲下时按 crouchRegenMultiplier
 ///    加速；奔跑中 SP 归零会把奔跑档锁定为走路，玩家先回到走路 / 停步、再重新推起来
-///    才恢复奔跑（避免体力刚回一点就在跑 / 走之间来回抽）。HP 暂只托管数值与事件，
-///    受伤 / 死亡规则待受伤系统接入。消耗数值见下方「体力消耗」节，均可调。
+///    才恢复奔跑（避免体力刚回一点就在跑 / 走之间来回抽）。消耗数值见下方「体力消耗」节，均可调。
+/// 10. 受伤（受击硬直）：CharacterState 真正扣到血时触发它的 OnTakeDamage 事件，参数即攻击者
+///    Transform；本组件的 <see cref="GetHurt"/> 订阅该事件（Inspector 里挂的动态监听），
+///    进入硬直后锁死移动 / 跳跃 / 攻击 / 闪避，并把角色朝背离攻击者的方向推开（只清水平速度，
+///    空中被打继续下落）。解除靠受伤动画播完（HurtAnimation.OnStateExit → <see cref="EndHurt"/>），
+///    另有 hurtDuration 兜底计时与 OnDisable 兜底，保证玩家不会被永久锁死。
+///    受伤动画播在 ksm.controller 的 HurtLayer（Override 层，权重 1）：默认空状态不写任何属性，
+///    基础层 locomotion 照常；进 hurt 状态时覆盖精灵，播完回空状态，基础层自动接回。
 /// </summary>
 [RequireComponent(typeof(Rigidbody2D))]
 public class PlayerController : MonoBehaviour
@@ -191,6 +197,14 @@ public class PlayerController : MonoBehaviour
     [Tooltip("地面奔跑时每帧消耗的体力（60fps 基准，运行时按帧时长换算，高/低刷新率手感一致）。0.2 ≈ 12/秒，配合恢复 0.1/帧（6/秒）约 17 秒跑空。走路 / 空中操控 / 蹲下不消耗；奔跑中体力耗尽会把奔跑档锁定为走路，直到玩家回到走路 / 停步后重新推起。设为 0 即恢复免费奔跑。")]
     public float runStaminaDrainPerFrame = 0.2f;
 
+    // ───────────────────────────── 受伤 ─────────────────────────────
+
+    [Header("受伤")]
+    [Tooltip("受击后被推开的冲量（ForceMode2D.Impulse）。刚体质量为 1，所以数值 ≈ 推开瞬间的水平速度（单位/秒）；玩家线性阻尼为 0，击退距离 ≈ 本值 × 受伤硬直时长。")]
+    public float hurtForce = 8f;
+    [Tooltip("受伤硬直时长（秒）：期间锁死操作（不能移动 / 跳跃 / 攻击 / 闪避），到期兜底解除。\n正常解除靠受伤动画播完（HurtAnimation.OnStateExit → EndHurt）；本值只是保险——动画层没挂上、动画缺失或动画被别的状态打断时，也不会把玩家永久锁死。调到与受伤动画等长即可（当前 hurt 片段 0.4s）。")]
+    public float hurtDuration = 0.4f;
+
     // ───────────────────────────── 运行时状态 ─────────────────────────────
 
     /// <summary>当前帧的原始移动输入。</summary>
@@ -222,6 +236,13 @@ public class PlayerController : MonoBehaviour
 
     /// <summary>水平速度的绝对值，供动画混合使用。</summary>
     public float HorizontalSpeed => rb != null ? Mathf.Abs(rb.velocity.x) : 0f;
+
+    /// <summary>
+    /// 是否处于受伤硬直中：受击瞬间（<see cref="GetHurt"/>）置真，期间锁死移动 / 跳跃 / 攻击 / 闪避
+    /// 且不再接管水平速度（保留击退位移）。解除走 <see cref="EndHurt"/>：
+    /// 受伤动画播完（HurtAnimation.OnStateExit）、兜底计时到期、或组件禁用，三者取其先到。
+    /// </summary>
+    public bool IsHurt { get; private set; }
 
     /// <summary>当前运动状态。</summary>
     public MoveState CurrentState
@@ -294,6 +315,8 @@ public class PlayerController : MonoBehaviour
     private bool jumpCutPending;
     private bool isJumping;
 
+    private float hurtTimer;            // 受伤硬直的兜底计时（正常解除走 HurtAnimation.OnStateExit → EndHurt）
+
     // ─────────────────────────────── 生命周期 ───────────────────────────────
 
     private void Awake()
@@ -364,6 +387,9 @@ public class PlayerController : MonoBehaviour
         // state 是 Unity 对象，已销毁时 != 判定为 false，不会取已销毁对象的成员。
         if (state != null)
             state.HoldGlobalInvincible(false);
+
+        // 兜底：受伤硬直中组件被禁用 / 场景切换时解除硬直，防止带着锁死状态离开。
+        EndHurt();
     }
 
     private void OnDestroy()
@@ -415,7 +441,9 @@ public class PlayerController : MonoBehaviour
             jumpCutPending = true;
 
         // 闪避期间强制站姿：冲刺中不接受蹲下（蹲下状态触发闪避会先尝试起身）。
-        SetCrouching(crouchInput && IsGrounded && !IsDodging);
+        // 受伤硬直期间冻结蹲姿：既不接收蹲下输入，也不强行起身（挨打不该顺带站起来）。
+        if (!IsHurt)
+            SetCrouching(crouchInput && IsGrounded && !IsDodging);
         // 蹲下状态同步给 CharacterState：蹲下时体力恢复加速（倍率在 CharacterState 上）。
         if (state != null)
             state.SetCrouching(IsCrouching);
@@ -440,6 +468,14 @@ public class PlayerController : MonoBehaviour
             attackCooldownTimer = Mathf.Max(0f, attackCooldownTimer - dt);
         if (attackTimer > 0f)
             attackTimer = Mathf.Max(0f, attackTimer - dt);
+        if (hurtTimer > 0f)
+        {
+            hurtTimer = Mathf.Max(0f, hurtTimer - dt);
+            // 兜底解除：受伤动画没挂上 / 动画缺失时也不会把玩家永久锁死。
+            // 正常路径是动画播完时 HurtAnimation.OnStateExit 调 EndHurt，谁先到算谁。
+            if (hurtTimer <= 0f)
+                EndHurt();
+        }
         if (IsDodging)
         {
             dodgeTimer -= dt;
@@ -495,10 +531,11 @@ public class PlayerController : MonoBehaviour
         if (diveLatch)
             rb.velocity = new Vector2(rb.velocity.x, -crouchDiveSpeed);
 
-        // 闪避期间水平速度由冲刺锁定，跳过常规移动控制。
+        // 闪避期间水平速度由冲刺锁定，跳过常规移动控制；
+        // 受伤硬直期间同样跳过：不接管水平速度，让击退位移自然保留（竖直仍走上面的重力 / 下落限制）。
         if (IsDodging)
             rb.velocity = new Vector2(dodgeDirection * dodgeSpeed, rb.velocity.y);
-        else
+        else if (!IsHurt)
             Move();
     }
 
@@ -595,7 +632,8 @@ public class PlayerController : MonoBehaviour
     /// </summary>
     public void RequestDodge()
     {
-        if (rb == null || IsDodging || dodgeCooldownTimer > 0f)
+        // 受伤硬直期间不能闪避（不消耗体力、不进冷却、不触发特效）。
+        if (rb == null || IsHurt || IsDodging || dodgeCooldownTimer > 0f)
             return;
 
         // 体力不足则整个放弃本次闪避（不消耗、不进冷却、不起身、不触发特效）。
@@ -655,7 +693,8 @@ public class PlayerController : MonoBehaviour
     /// </summary>
     public void RequestAttack()
     {
-        if (rb == null || attackCooldownTimer > 0f)
+        // 受伤硬直期间不能攻击（不消耗体力、不进冷却、不发音波）。
+        if (rb == null || IsHurt || attackCooldownTimer > 0f)
             return;
 
         // 体力不足则整个放弃本次攻击（不消耗、不进冷却、不发音波、不触发事件）。
@@ -723,6 +762,13 @@ public class PlayerController : MonoBehaviour
     {
         if (jumpBufferTimer <= 0f)
             return;
+
+        // 受伤硬直期间不允许起跳：吃掉本次缓冲，否则硬直一解除的那一帧角色会突然自己跳起来。
+        if (IsHurt)
+        {
+            jumpBufferTimer = 0f;
+            return;
+        }
 
         // 下潜期间不允许起跳；缓冲会一直保留到落地那一帧。
         // 闪避期间同样不允许起跳（与下潜一致），缓冲保留到冲刺结束。
@@ -925,8 +971,9 @@ public class PlayerController : MonoBehaviour
 
     private void UpdateFacing()
     {
-        // 冲刺方向在触发时锁定，期间不随输入翻转。
-        if (IsDodging)
+        // 冲刺方向在触发时锁定，期间不随输入翻转；
+        // 受伤硬直期间同样锁定（挨打时人已经在被推走了，此时翻面会很跳）。
+        if (IsDodging || IsHurt)
             return;
 
         if (Mathf.Abs(InputDirection.x) < inputDeadZone)
@@ -984,7 +1031,71 @@ public class PlayerController : MonoBehaviour
         return keyboard != null && (keyboard.leftCtrlKey.isPressed || keyboard.rightCtrlKey.isPressed);
     }
 
-    // ─────────────────────────────── 编辑器辅助 ───────────────────────────────
+    // ───────────────────────────── 受伤 ─────────────────────────────
+
+    /// <summary>
+    /// 受击：进入受伤硬直，把角色朝「背离攻击者」的方向推开一段，期间锁死操作。
+    /// 由同物体 CharacterState 的 <see cref="CharacterState.OnTakeDamage"/> 事件驱动
+    /// （Inspector 里挂的动态 Transform 监听，参数就是攻击者）——只有伤害真正生效时才会被调用，
+    /// 无敌帧 / 同一来源无敌挡下的伤害不会走到这里。
+    /// 硬直期间：移动 / 跳跃 / 攻击 / 闪避全部不接受输入，水平速度也不再被接管（击退位移原样保留），
+    /// 竖直方向照常走重力与下落限制（空中被打继续往下掉，不悬停）。
+    /// 解除走三条路径取其先到：① 受伤动画播完（HurtAnimation.OnStateExit → <see cref="EndHurt"/>）；
+    /// ② 兜底计时 hurtDuration 到期；③ 组件禁用 / 场景切换（OnDisable）。
+    ///
+    /// **硬直中重复进入会被忽略**（下面的 IsHurt 早退）：否则一次受击会播两遍受伤动画、
+    /// 击退也会更远——hurt 是 Trigger，硬直中再 SetTrigger 会留在队列里，等本次动画退场后
+    /// 又被消费一次；同时 hurtTimer 被重置会让滑行时长翻倍（玩家线性阻尼为 0，
+    /// 滑行距离 ∝ 硬直时长）。要「每次受击都有反馈」请调 <see cref="CharacterState.invincibleTime"/>，
+    /// 而不是在这里放行重入。
+    /// </summary>
+    /// <param name="attacker">攻击者（伤害来源）的 Transform；null 时无法算方向，退化为「背对当前朝向」推开。</param>
+    public void GetHurt(Transform attacker)
+    {
+        // 硬直中忽略重入：保证一次受击只播一遍动画、只击退一次（见上方注释）。
+        if (IsHurt)
+            return;
+
+        // 先把"已进入硬直"记下来，再做后面的击退。
+        // 顺序很重要：OnTakeDamage 的两条监听里 PlayHurt 在前、GetHurt 在后，
+        // 硬直标记必须在本方法里就建立起来，否则重复注册的监听会绕过 IsHurt 判断，
+        // 造成动画播两遍 / 击退叠加。rb 缺失只是没法击退，硬直本身照样要生效。
+        IsHurt = true;
+        hurtTimer = hurtDuration;
+
+        if (rb == null)
+            return;
+
+        // 击退方向：背离攻击者。两者 X 重合（贴身命中）或攻击者已被销毁时方向算不出来，
+        // 退化成背对当前朝向——保证「挨打一定会被推开」，不会静默变成没有击退。
+        int direction = -FacingDirection;
+        if (attacker != null)
+        {
+            float away = transform.position.x - attacker.position.x;
+            if (Mathf.Abs(away) > 0.0001f)
+                direction = away > 0f ? 1 : -1;
+        }
+
+        // 只清水平速度：空中被打仍按重力继续下落，保留下落手感。
+        // 冲量走 ForceMode2D.Impulse，刚体质量为 1，所以推开初速度 ≈ hurtForce。
+        rb.velocity = new Vector2(0f, rb.velocity.y);
+        rb.AddForce(new Vector2(direction * hurtForce, 0f), ForceMode2D.Impulse);
+
+        // 打断攻击效果窗口：都被打断了，就别再享受攻击窗口的下落减缓 / 移速修正。
+        attackTimer = 0f;
+    }
+
+    /// <summary>
+    /// 解除受伤硬直，恢复操作。正常由受伤动画播完时的 HurtAnimation.OnStateExit 调用；
+    /// 兜底计时与 OnDisable 同样走这里（见 FixedUpdate / OnDisable）。重复调用没有副作用。
+    /// </summary>
+    public void EndHurt()
+    {
+        IsHurt = false;
+        hurtTimer = 0f;
+    }
+
+    // ───────────────────────────── 编辑器辅助 ─────────────────────────────
 
     private void OnValidate()
     {

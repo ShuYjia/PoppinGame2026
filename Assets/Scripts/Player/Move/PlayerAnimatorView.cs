@@ -11,6 +11,7 @@ using UnityEngine;
 ///   播完接 crouchIdle（蹲姿摆动循环）；false 时回 idle。
 /// - Dodge(Trigger)：闪避，AnyState → sprint。
 /// - Attack(Trigger)：普通攻击，AnyState → normalAttack（仅地面攻击触发，见 PlayerController）。
+/// - hurt(Trigger)：受伤，HurtLayer（Override 层，权重 1）的 New State → 受伤状态，播完自动回空状态。
 ///
 /// velocityY、isGround 与 IsCrouching 必须每帧都写：漏写时混合树会停在默认值 velocityY = 0（最高点姿势），
 /// 而 isGround 一直是 false 时角色永远不会从空中状态落回；IsCrouching 漏写则蹲下动画不触发。
@@ -44,6 +45,12 @@ public class PlayerAnimatorView : MonoBehaviour
 
     /// <summary>Animator 的 Attack 触发器哈希（ksm.controller 中新增的参数）。</summary>
     private static readonly int AttackParam = Animator.StringToHash("Attack");
+
+    /// <summary>Animator 的 hurt 触发器哈希（ksm.controller 中新增的参数）：AnyState → HurtLayer 的受伤状态。</summary>
+    private static readonly int HurtParam = Animator.StringToHash("hurt");
+
+    /// <summary>受伤状态名（ksm.controller 的 HurtLayer → ksmHurt2）的哈希，用于判断"是否已经在播受伤动画"。</summary>
+    private static readonly int HurtStateHash = Animator.StringToHash("ksmHurt2");
 
     private const string DodgeEffectRootName = "Sprite Mask";    // 闪避特效根物体（SpriteMask 遮罩窗口 + 特效之父）
     private const string DodgeEffectName = "111_export-export"; // 闪避特效子物体（sprint 片段驱动其激活与位移）
@@ -116,6 +123,53 @@ public class PlayerAnimatorView : MonoBehaviour
     {
         if (animator != null)
             animator.SetTrigger(AttackParam);
+    }
+
+    /// <summary>
+    /// 触发一次受伤（ksm.controller 的 hurt 触发器 → HurtLayer 的受伤状态）。
+    /// 由同物体 CharacterState 的 OnTakeDamage 事件驱动（Inspector 里挂的监听，
+    /// 与 PlayerController.GetHurt 并列）——只有真正扣到血的伤害才会触发它。
+    /// 硬直的解除不归本组件管：受伤动画播完时由状态上的 HurtAnimation 回调 PlayerController.EndHurt。
+    ///
+    /// **重复触发会被挡住（两道闸）**：
+    /// ① 已经处于受伤硬直（controller.IsHurt）→ 直接忽略；
+    /// ② Animator 正在播受伤状态 → 忽略。
+    /// 原因：hurt 是 Trigger 参数，**在受伤状态播放途中再 SetTrigger 不会被立刻消费，
+    /// 而是留在队列里**，等本次动画退场回默认空状态后才被 New State → ksmHurt2 过渡消费
+    /// → 动画再播一遍（同时 GetHurt 也会重置硬直计时，击退滑行距离跟着翻倍）。
+    /// 运行时 UnityEvent 的持久化监听有可能被重复注册（脚本重编译 / 场景在 Play 中被重新加载时
+    /// 会重建监听列表），所以这里必须按"幂等"来写，不能假设一次伤害只回调一次。
+    /// </summary>
+    public void PlayHurt()
+    {
+        if (animator == null)
+            return;
+
+        if (controller != null && controller.IsHurt)
+            return;
+
+        if (IsPlayingHurtAnimation())
+            return;
+
+        animator.SetTrigger(HurtParam);
+    }
+
+    /// <summary>
+    /// 当前是否正在播受伤动画（扫所有层找名为 ksmHurt2 的状态）。
+    /// 不写死层序号，避免以后调整 controller 的层顺序时这里失效。
+    /// </summary>
+    private bool IsPlayingHurtAnimation()
+    {
+        if (animator == null)
+            return false;
+
+        for (int i = 0; i < animator.layerCount; i++)
+        {
+            if (animator.GetCurrentAnimatorStateInfo(i).shortNameHash == HurtStateHash)
+                return true;
+        }
+
+        return false;
     }
 
     // ───────────────────────────── 表现层 ─────────────────────────────

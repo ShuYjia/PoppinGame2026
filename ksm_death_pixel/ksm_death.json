@@ -1,0 +1,190 @@
+{
+  "name": "ksm_death",
+  "display_name": "ksm 死亡",
+  "source": "ksm_death/frame_0[20-101].png",
+  "source_frames": 82,
+  "frame_count": 16,
+  "fps": 12,
+  "loop": false,
+  "duration_sec": 1.333,
+  "native_grid": [
+    72,
+    72
+  ],
+  "padding": 6,
+  "cell": [
+    84,
+    84
+  ],
+  "frame_size": [
+    84,
+    84
+  ],
+  "blink_frames": [],
+  "pivot": {
+    "x": 42.0,
+    "y": 77,
+    "note": "脚底中心；所有帧底边贴地"
+  },
+  "palette_count": 21,
+  "palette": [
+    [
+      170,
+      110,
+      102
+    ],
+    [
+      242,
+      210,
+      207
+    ],
+    [
+      118,
+      68,
+      68
+    ],
+    [
+      189,
+      15,
+      26
+    ],
+    [
+      255,
+      255,
+      255
+    ],
+    [
+      210,
+      164,
+      148
+    ],
+    [
+      52,
+      56,
+      76
+    ],
+    [
+      151,
+      114,
+      100
+    ],
+    [
+      0,
+      0,
+      0
+    ],
+    [
+      216,
+      155,
+      151
+    ],
+    [
+      222,
+      87,
+      91
+    ],
+    [
+      109,
+      67,
+      57
+    ],
+    [
+      145,
+      87,
+      189
+    ],
+    [
+      213,
+      156,
+      227
+    ],
+    [
+      194,
+      203,
+      208
+    ],
+    [
+      255,
+      230,
+      74
+    ],
+    [
+      57,
+      27,
+      22
+    ],
+    [
+      71,
+      39,
+      118
+    ],
+    [
+      193,
+      74,
+      255
+    ],
+    [
+      170,
+      51,
+      54
+    ],
+    [
+      74,
+      178,
+      255
+    ]
+  ],
+  "palette_source": {
+    "file": "D:/bang/nfc/ksm/12.png",
+    "note": "官方原生像素画（640x640 / 块宽 10px / 原生 64x64 / 已带 alpha / 21 色）",
+    "mapping": "主导色配对算 Lab 明度平移，再最近邻映射到官方 21 色",
+    "correction": "AI 源图整体比官方图暗约 13.6%，仅平移明度、保留色相与饱和度"
+  },
+  "alignment": {
+    "horizontal": "统一平移，基准=站立帧脚底中心",
+    "vertical": "逐帧底边贴内容区底部（原地倒地，不悬空）"
+  },
+  "processing": {
+    "watermark_removed": true,
+    "watermark_bbox": [
+      600,
+      670,
+      720,
+      720
+    ],
+    "order": "先统一调色板量化（消抗锯齿渐变）-> 再众数降采样（非平均）",
+    "downsample": "1/10 众数",
+    "quantize": "全序列统一调色板最近色映射",
+    "flatten": "清理孤立像素与过小 alpha 连通域",
+    "alpha": "格内覆盖度<0.5 丢弃，输出二值 alpha"
+  },
+  "selected_source_frames": [
+    20,
+    26,
+    31,
+    37,
+    43,
+    48,
+    54,
+    60,
+    66,
+    71,
+    77,
+    83,
+    88,
+    94,
+    95,
+    101
+  ],
+  "unity_import": {
+    "SpriteMode": "Multiple",
+    "GridByCellSize": [
+      84,
+      84
+    ],
+    "FilterMode": "Point",
+    "Compression": "None",
+    "Pivot": "BottomCenter",
+    "PPU_note": "与 ksm_hurt_pixel 同一 PPU（同为 10px/block 原生格）"
+  }
+}

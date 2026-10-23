@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.Events;
 
 /// <summary>
 /// 角色状态组件：**玩家与敌人共用同一套血量（HP）计算**。
@@ -47,6 +48,7 @@ using UnityEngine;
 /// 上限 / 恢复量的成长接口见文件末尾「成长扩展点」（占位，逻辑留空）。
 ///
 /// HUD / 音效等表现层订阅 HealthChanged / StaminaChanged / Died 即可，本组件不直接碰 UI。
+/// 受伤表现（动画 / 击退）订阅 <see cref="OnTakeDamage"/>：只有真正扣血才触发，参数即攻击者 Transform。
 /// </summary>
 public class CharacterState : MonoBehaviour
 {
@@ -78,6 +80,10 @@ public class CharacterState : MonoBehaviour
 
     [Tooltip("当前体力值。Play 中直接改这里即可构造体力门控测试（如设成 5 再跳跃 / 闪避 / 攻击）；直接改字段不会触发 StaminaChanged 事件（调试面板每帧读取，显示会立即跟上），退出 Play 后还原为进 Play 时的值。")]
     public float CurrentSP;
+
+    [Header("受伤事件")]
+    [Tooltip("「真正扣到血」的瞬间触发，参数是伤害来源的 Transform（攻击者的位置，用于算击退方向）。\n在 Inspector 里挂监听即可扩展表现：播放受伤动画、触发受击技能、播放音效、屏幕震动等。\n注意三种情况不会触发：①被无敌帧 / 同一来源无敌挡下；②已死亡；③无来源的绝对伤害（没有攻击者可传）。\n触发顺序：先扣血并触发 HealthChanged（致死时再触发 Died），最后才触发本事件——监听者读到的是扣血之后的 HP。")]
+    public UnityEvent<Transform> OnTakeDamage;
 
     /// <summary>生命归一化值（0~1），供 HUD 血条使用。</summary>
     public float HP01 => maxHP <= 0f ? 0f : Mathf.Clamp01(CurrentHP / maxHP);
@@ -357,7 +363,8 @@ public class CharacterState : MonoBehaviour
     /// 受到 attacker 造成的伤害（**战斗伤害的统一入口**：<c>TakeDamage(this)</c> 这样调用即可）。
     /// 伤害值取 attacker.damage，来源取 attacker 所在的 GameObject，因此同一只 Boar 身上
     /// 挂的所有 Attack 共用一份无敌冷却。
-    /// 若正处于对该来源的无敌期，本次伤害**完全不发生**（不扣血、不触发事件）并返回 false。
+    /// 若正处于对该来源的无敌期、或处于全局无敌（闪避无敌帧 / 技能无敌）中，本次伤害
+    /// **完全不发生**（不扣血、不触发 HealthChanged、不触发 <see cref="OnTakeDamage"/>）并返回 false。
     /// </summary>
     /// <returns>是否真的造成了伤害。</returns>
     public bool TakeDamage(Attack attacker)
@@ -365,18 +372,21 @@ public class CharacterState : MonoBehaviour
         if (attacker == null)
             return false;
 
+        // 事件由带来源重载统一触发（真正扣血之后），这里不再单独 Invoke——
+        // 否则无敌帧挡下的伤害也会播受伤动画 / 触发击退。
         return TakeDamage(attacker.damage, attacker);
     }
 
     /// <summary>
     /// 受到 source 造成的伤害（通用的带来源重载）。
     /// 若正处于对该来源的无敌期，本次伤害**完全不发生**（不扣血、不触发事件）并返回 false；
-    /// 否则扣血、给该来源挂上 invincibleTime 秒的无敌，返回 true。
+    /// 否则扣血、触发 <see cref="OnTakeDamage"/>（参数为来源 Transform），
+    /// 再给该来源挂上 invincibleTime 秒的无敌，返回 true。
     /// 换一个来源不受本冷却影响——这正是「同一来源无敌」的口径。
     /// </summary>
     /// <param name="amount">伤害数值。</param>
     /// <param name="source">伤害来源（传 GameObject 或 Component 都行，内部归一到 GameObject）。
-    /// 传 null 等价于调用无来源重载（不受无敌保护）。</param>
+    /// 传 null 等价于调用无来源重载（不受无敌保护，也不触发 <see cref="OnTakeDamage"/>——没有攻击者可传）。</param>
     /// <returns>是否真的造成了伤害。</returns>
     public bool TakeDamage(float amount, UnityEngine.Object source)
     {
@@ -398,10 +408,29 @@ public class CharacterState : MonoBehaviour
 
         ApplyDamage(amount);
 
+        // 受伤事件：走到这里说明伤害真的生效了（无敌没挡住、且确实扣了血）。
+        // 触发顺序在 HealthChanged / Died 之后——监听者读到的 CurrentHP 已经是扣血后的值。
+        OnTakeDamage?.Invoke(ResolveSourceTransform(source));
+
         if (invincibleTime > 0f)
             invincibilityTimers[GetSourceKey(source)] = invincibleTime;
 
         return true;
+    }
+
+    /// <summary>
+    /// 把伤害来源还原成 Transform（供 <see cref="OnTakeDamage"/> 传出攻击者位置，用于算击退方向）：
+    /// Component 与 GameObject 都取它自己的 transform，其余类型取不到就返回 null
+    /// （监听方需要对 null 做兜底，见 <see cref="PlayerController.GetHurt"/>）。
+    /// </summary>
+    private static Transform ResolveSourceTransform(UnityEngine.Object source)
+    {
+        Component component = source as Component;
+        if (component != null)
+            return component.transform;
+
+        GameObject gameObject = source as GameObject;
+        return gameObject != null ? gameObject.transform : null;
     }
 
     /// <summary>实际扣血 + 事件 + 死亡判定的内部实现（不判无敌）。</summary>
