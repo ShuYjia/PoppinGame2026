@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Events;
 
 /// <summary>
 /// 角色动画控制组件：把 PlayerController 算出的运动状态写入 Animator 参数，
@@ -57,6 +58,8 @@ public class PlayerAnimatorView : MonoBehaviour
 
     private PlayerController controller;
     private SpriteRenderer spriteRenderer;
+    private CharacterState state;
+    private UnityAction<Transform> onTakeDamage;
 
     private Transform dodgeEffect;
     private SpriteRenderer dodgeEffectRenderer;
@@ -69,6 +72,8 @@ public class PlayerAnimatorView : MonoBehaviour
             animator = GetComponent<Animator>();
         controller = GetComponent<PlayerController>();
         spriteRenderer = GetComponent<SpriteRenderer>();
+        state = GetComponent<CharacterState>();
+        onTakeDamage = OnTakeDamage;
 
         // 闪避特效根物体（FirstLevel 场景为 Player 下的 "Sprite Mask"）：sprint 片段通过它
         // 驱动子物体的激活与位移，它同时是遮罩窗口；向左闪避时按方向镜像它的位置。
@@ -81,6 +86,32 @@ public class PlayerAnimatorView : MonoBehaviour
             if (dodgeEffect != null)
                 dodgeEffectRenderer = dodgeEffect.GetComponent<SpriteRenderer>();
         }
+    }
+
+    private void OnEnable()
+    {
+        // 代码兜底订阅：场景里 Inspector 挂的持久化监听可能因脚本重编译 / 场景重载而丢失或重复注册，
+        // 导致受击动画不播或播两遍。两套并存的正确性由 PlayHurt 自身的幂等保护保证。
+        // 先摘再挂，避免组件被重复 Enable 时挂上两份。
+        if (state == null)
+            state = GetComponent<CharacterState>();
+        if (state == null || onTakeDamage == null)
+            return;
+
+        state.OnTakeDamage.RemoveListener(onTakeDamage);
+        state.OnTakeDamage.AddListener(onTakeDamage);
+    }
+
+    private void OnDisable()
+    {
+        if (state != null && onTakeDamage != null)
+            state.OnTakeDamage.RemoveListener(onTakeDamage);
+    }
+
+    /// <summary>受伤事件的代码兜底入口：参数（攻击者 Transform）本组件用不到，只负责播动画。</summary>
+    private void OnTakeDamage(Transform attacker)
+    {
+        PlayHurt();
     }
 
     // ───────────────────────────── 动画参数 ─────────────────────────────

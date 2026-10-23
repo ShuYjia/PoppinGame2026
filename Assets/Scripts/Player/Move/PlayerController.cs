@@ -377,6 +377,8 @@ public class PlayerController : MonoBehaviour
         if (inputControl == null)
             inputControl = new PlayerInputControl();
         inputControl.Enable();
+
+        SubscribeTakeDamage();
     }
 
     private void OnDisable()
@@ -390,6 +392,39 @@ public class PlayerController : MonoBehaviour
 
         // 兜底：受伤硬直中组件被禁用 / 场景切换时解除硬直，防止带着锁死状态离开。
         EndHurt();
+
+        UnsubscribeTakeDamage();
+    }
+
+    // ───────────────────────────── 受伤事件订阅（代码兜底） ─────────────────────────────
+
+    /// <summary>
+    /// 订阅 <see cref="CharacterState.OnTakeDamage"/>（**代码兜底**）。
+    ///
+    /// 为什么需要：场景里 Inspector 挂的持久化监听在**脚本重编译 / 场景在 Play 中被重新反序列化**时，
+    /// 运行时的 invokable 列表会被重建——可能**丢失**（受击完全没反应：不扣硬直、不击退、不播动画），
+    /// 也可能**重复注册**（同一个监听跑两遍：动画播两遍、击退距离翻倍）。这两种都实测遇到过。
+    /// 所以这里用代码再订阅一份保底。
+    ///
+    /// 两套并存不会重复触发：<see cref="GetHurt"/> 自身有 IsHurt 幂等保护，
+    /// 无论哪一套先跑到，第二次起都是空操作。挂载前先 RemoveListener 再 AddListener，
+    /// 防止组件被重复 Enable 时挂上两份（委托按 target+method 比较，Remove 能正确摘掉）。
+    /// </summary>
+    private void SubscribeTakeDamage()
+    {
+        if (state == null)
+            state = GetComponent<CharacterState>();
+        if (state == null)
+            return;
+
+        state.OnTakeDamage.RemoveListener(GetHurt);
+        state.OnTakeDamage.AddListener(GetHurt);
+    }
+
+    private void UnsubscribeTakeDamage()
+    {
+        if (state != null)
+            state.OnTakeDamage.RemoveListener(GetHurt);
     }
 
     private void OnDestroy()
