@@ -66,6 +66,15 @@ using UnityEngine.InputSystem;
 ///    另有 hurtDuration 兜底计时与 OnDisable 兜底，保证玩家不会被永久锁死。
 ///    受伤动画播在 ksm.controller 的 HurtLayer（Override 层，权重 1）：默认空状态不写任何属性，
 ///    基础层 locomotion 照常；进 hurt 状态时覆盖精灵，播完回空状态，基础层自动接回。
+/// 11. 死亡：CharacterState 把 HP 打到 0 时触发它的 Died / OnDie（同一时刻的两个出口），
+///    本组件的 <see cref="PlayerDead"/> 收到后：禁用 GamePlay 输入表、清掉冲刺 / 下潜 / 硬直等
+///    进行中的状态，并**横向锁死刚体**（清掉水平速度 + freeze X 轴约束——尸体不能左右移动，
+///    也不能被 Boar 撞着横着滑）。纵向一律放任：死亡瞬间的上升 / 下落速度原样保留，
+///    FixedUpdate 里继续照常施加重力与最大下落速度限制（空中死亡自然落地、躺下时被地板接住）。
+///    Update 不再采样输入、FixedUpdate 不再驱动移动，动画由
+///    <see cref="PlayerAnimatorView"/> 写 isDead 进入 ksmDie1 死亡状态。
+///    两条订阅通路（场景持久化监听 + 代码兜底）靠 deathHandled 幂等，重复注册也只清理一次。
+///    UI / 音乐 / 复活留给后续迭代（复活时记得解除 FreezePositionX）。
 /// </summary>
 [RequireComponent(typeof(Rigidbody2D))]
 public class PlayerController : MonoBehaviour
@@ -244,6 +253,14 @@ public class PlayerController : MonoBehaviour
     /// </summary>
     public bool IsHurt { get; private set; }
 
+    /// <summary>
+    /// 是否已死亡。直接读同物体 <see cref="CharacterState"/> 的 IsDead，**不开第二份状态**：
+    /// 状态源只有 CharacterState 一处，将来的 Heal / ResetToFull 把标记解除时这里自动跟上，
+    /// 不会出现「state 说没死、控制器说死了」的错位（受伤系统已在 TakeDamage 上踩过同类坑）。
+    /// 死亡后的处理（停输入 / 清状态 / 通知动画）见 <see cref="PlayerDead"/>。
+    /// </summary>
+    public bool IsDead => state != null && state.IsDead;
+
     /// <summary>当前运动状态。</summary>
     public MoveState CurrentState
     {
@@ -317,6 +334,11 @@ public class PlayerController : MonoBehaviour
 
     private float hurtTimer;            // 受伤硬直的兜底计时（正常解除走 HurtAnimation.OnStateExit → EndHurt）
 
+    // 死亡处理是否已执行过（幂等标记，与「是否死亡」不是一回事）：
+    // OnDie 有两条并行通路（场景持久化监听 + 代码兜底订阅），重复注册时会走到 PlayerDead 两次。
+    // 标记为 true 后 IsDead 也会同步为真，所以不能用 IsDead 兼做幂等——那样死亡瞬间自己就把自己挡掉了。
+    private bool deathHandled;
+
     // ─────────────────────────────── 生命周期 ───────────────────────────────
 
     private void Awake()
@@ -379,6 +401,7 @@ public class PlayerController : MonoBehaviour
         inputControl.Enable();
 
         SubscribeTakeDamage();
+        SubscribeDeath();
     }
 
     private void OnDisable()
@@ -394,6 +417,7 @@ public class PlayerController : MonoBehaviour
         EndHurt();
 
         UnsubscribeTakeDamage();
+        UnsubscribeDeath();
     }
 
     // ───────────────────────────── 受伤事件订阅（代码兜底） ─────────────────────────────
@@ -427,6 +451,29 @@ public class PlayerController : MonoBehaviour
             state.OnTakeDamage.RemoveListener(GetHurt);
     }
 
+    /// <summary>
+    /// 订阅 <see cref="CharacterState.Died"/>（**代码兜底**），与受伤事件同一套打法。
+    /// 场景里 CharacterState.OnDie 上挂的持久化监听会在脚本重编译 / 场景在 Play 中被重新反序列化时
+    /// 丢失（实测过），到时候 HP 归零了却没人执行死亡处理。这里用代码再订阅一份保底。
+    /// 两条并存不会执行两次：<see cref="PlayerDead"/> 自带幂等标记。
+    /// </summary>
+    private void SubscribeDeath()
+    {
+        if (state == null)
+            state = GetComponent<CharacterState>();
+        if (state == null)
+            return;
+
+        state.Died -= PlayerDead;
+        state.Died += PlayerDead;
+    }
+
+    private void UnsubscribeDeath()
+    {
+        if (state != null)
+            state.Died -= PlayerDead;
+    }
+
     private void OnDestroy()
     {
         if (inputControl != null)
@@ -436,6 +483,12 @@ public class PlayerController : MonoBehaviour
     private void Update()
     {
         if (inputControl == null || rb == null)
+            return;
+
+        // 死亡：彻底停止输入采样——不再读方向 / 蹲下 / 闪避 / 攻击，也不进跳跃缓冲。
+        // 注意 InputDirection 会保留死亡前最后一次的值，但 FixedUpdate 那边另有闸门不会用它移动。
+        // 这里也不能去「刷新动画」：地面/空中参数停在死亡瞬间的状态，角色按当时的姿态倒下。
+        if (IsDead)
             return;
 
         InputDirection = inputControl.GamePlay.Move.ReadValue<Vector2>();
@@ -491,6 +544,14 @@ public class PlayerController : MonoBehaviour
     {
         if (rb == null || col == null)
             return;
+
+        // 死亡：横向已在 PlayerDead 里 freeze，本阶段只剩纵向的事——
+        // 继续施加重力 + 最大下落速度限制，让空中死亡自然落地、躺下时被地板接住。
+        if (IsDead)
+        {
+            ApplyGravity();
+            return;
+        }
 
         float dt = Time.fixedDeltaTime;
         if (jumpBufferTimer > 0f)
@@ -1128,6 +1189,68 @@ public class PlayerController : MonoBehaviour
     {
         IsHurt = false;
         hurtTimer = 0f;
+    }
+
+    /// <summary>
+    /// 死亡处理入口：HP 归零的同一帧由 <see cref="CharacterState.OnDie"/> 触发。
+    /// 有两条并行通路都指向这里——场景 Inspector 里挂的持久化监听，加上本组件为了防「重编译丢监听」
+    /// 而做的代码兜底订阅（<see cref="SubscribeDeath"/>），所以必须写成幂等：
+    /// 由 deathHandled 保证整套清理只跑一次（受伤系统的 GetHurt 同款教训）。
+    ///
+    /// 本方法做四件事：停输入、清掉所有进行中的状态、清水平速度、通知动画层。
+    /// **不做**的事：UI / 音乐 / 复活 / 尸体渐隐——那些留待后续迭代，从这里的调用点往后接。
+    /// </summary>
+    public void PlayerDead()
+    {
+        if (state == null)
+            return;
+
+        // 还没死（Invoke 之外的手动调用）→ 什么都不做；顺便自愈：
+        // 从死亡状态回来（Heal / ResetToFull）之后放开幂等标记，否则再次死亡将不会被处理。
+        if (!state.IsDead)
+        {
+            deathHandled = false;
+            return;
+        }
+
+        if (deathHandled)
+            return;
+        deathHandled = true;
+
+        // 1) 停输入：禁用整个 GamePlay 动作表，连缓冲都不会再攒。
+        if (inputControl != null)
+            inputControl.GamePlay.Disable();
+
+        // 2) 清掉所有「进行中」的状态，避免带着上一帧的动作死掉：
+        //    - 闪避：冲刺速度每帧由 FixedUpdate 写入，不清会带着 dodgeSpeed 一路滑着死；
+        //      同时必须归还无敌持有（它是纯开关，没人收就永久无敌）。
+        if (IsDodging)
+        {
+            IsDodging = false;
+            dodgeTimer = 0f;
+        }
+        state.HoldGlobalInvincible(false);
+        //    - 下潜：不清会继续以 crouchDiveSpeed 砸到地面。
+        diveLatch = false;
+        //    - 受伤硬直：解掉硬直与它的兜底计时，死了就没必要再锁操作 / 留给 EndHurt 收尾。
+        EndHurt();
+        //    - 攻击窗口：都死了不该再享受攻击窗口的移速修正与下落减缓。
+        attackTimer = 0f;
+
+        // 3) 横向锁死、**纵向完全放任**（策划口径：尸体死亡后不能左右移动，但下落 / 惯性照常）。
+        //    既要清掉当前这一帧的水平速度（不然会按死前的冲刺速度滑一段），
+        //    也要 freeze X 轴约束（不然被 Boar 撞一下、地面有坡度时还是会被推着走）。
+        //    必须用 |= 保留原有冻结项——Rigidbody2D 默认带着 FreezeRotation Z，
+        //    直接赋值会把它抹掉，角色会开始翻滚。
+        if (rb != null)
+        {
+            rb.velocity = new Vector2(0f, rb.velocity.y);
+            rb.constraints |= RigidbodyConstraints2D.FreezePositionX;
+        }
+
+        // 4) Animator 只有一个出口——PlayerAnimatorView（本组件从不直接碰 Animator）。
+        if (animatorView != null)
+            animatorView.SetDead(true);
     }
 
     // ───────────────────────────── 编辑器辅助 ─────────────────────────────

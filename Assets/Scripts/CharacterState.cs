@@ -48,6 +48,8 @@ using UnityEngine.Events;
 /// 上限 / 恢复量的成长接口见文件末尾「成长扩展点」（占位，逻辑留空）。
 ///
 /// HUD / 音效等表现层订阅 HealthChanged / StaminaChanged / Died 即可，本组件不直接碰 UI。
+/// 死亡通知同样是双出口：Died（代码订阅）与 OnDie（Inspector 持久化监听，已挂 PlayerController.PlayerDead）；
+/// 「死了之后干什么」由各自的控制器决定，本组件不碰输入、不碰 Animator。
 /// 受伤表现（动画 / 击退）订阅 <see cref="OnTakeDamage"/>：只有真正扣血才触发，参数即攻击者 Transform。
 /// </summary>
 public class CharacterState : MonoBehaviour
@@ -84,6 +86,10 @@ public class CharacterState : MonoBehaviour
     [Header("受伤事件")]
     [Tooltip("「真正扣到血」的瞬间触发，参数是伤害来源的 Transform（攻击者的位置，用于算击退方向）。\n在 Inspector 里挂监听即可扩展表现：播放受伤动画、触发受击技能、播放音效、屏幕震动等。\n注意三种情况不会触发：①被无敌帧 / 同一来源无敌挡下；②已死亡；③无来源的绝对伤害（没有攻击者可传）。\n触发顺序：先扣血并触发 HealthChanged（致死时再触发 Died），最后才触发本事件——监听者读到的是扣血之后的 HP。")]
     public UnityEvent<Transform> OnTakeDamage;
+
+    [Header("死亡事件")]
+    [Tooltip("「HP 归零」的瞬间触发一次（无参数），与 C# 事件 Died 是同一个时刻的两个出口：\n本 UnityEvent 供 Inspector 挂持久化监听（当前 FirstLevel 里已挂 PlayerController.PlayerDead），Died 供代码订阅。\n触发顺序：先扣血并触发 HealthChanged，再触发 Died / OnDie——监听者读到的 CurrentHP 已经是 0。\n只有「本次伤害把 HP 打到 0」才会触发一次：已经死亡时再受伤会被 TakeDamage 的 IsDead 早退挡掉，\n不会重复触发；无来源的绝对伤害（TakeDamage(float)）同样会触发。\n**复活不会触发任何事件**：将来 UI / 音乐要收尾请另行处理（或查询 IsDead）。")]
+    public UnityEvent OnDie;
 
     /// <summary>生命归一化值（0~1），供 HUD 血条使用。</summary>
     public float HP01 => maxHP <= 0f ? 0f : Mathf.Clamp01(CurrentHP / maxHP);
@@ -341,7 +347,8 @@ public class CharacterState : MonoBehaviour
     }
 
     /// <summary>
-    /// 受到伤害：扣 HP 并触发 HealthChanged；HP 归零时把 IsDead 置真并触发一次 Died。
+    /// 受到伤害：扣 HP 并触发 HealthChanged；HP 归零时把 IsDead 置真，并触发一次 Died 与 OnDie
+    /// （同一时刻的两个出口，见 <see cref="OnDie"/>）。
     /// 本重载**不受受伤无敌保护**（无来源 = 绝对伤害）：剧情扣血、环境伤害、调试直接扣血走这里。
     /// 但全局无敌（闪避无敌帧）期间连绝对伤害也一并免疫——无敌帧的语义就是「这一刻不该掉血」。
     /// 战斗伤害请用 <see cref="TakeDamage(Attack)"/> 或 <see cref="TakeDamage(float, UnityEngine.Object)"/>。
@@ -444,7 +451,12 @@ public class CharacterState : MonoBehaviour
         if (CurrentHP <= 0f)
         {
             IsDead = true;
+
+            // 两个出口在同一帧各触发一次：C# event 给代码订阅，UnityEvent 给 Inspector 里的持久化监听。
+            // 「类里新增状态/事件出口时必须搜齐所有读取点」——加 OnDie 就要在这里接上，
+            // 否则 Inspecter 里挂好的监听永远收不到通知（PlayerController.PlayerDead 走的正是这条路）。
             Died?.Invoke();
+            OnDie?.Invoke();
         }
     }
 
