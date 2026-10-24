@@ -13,6 +13,8 @@ using UnityEngine.Events;
 /// - Dodge(Trigger)：闪避，AnyState → sprint。
 /// - Attack(Trigger)：普通攻击，AnyState → normalAttack（仅地面攻击触发，见 PlayerController）。
 /// - hurt(Trigger)：受伤，HurtLayer（Override 层，权重 1）的 New State → 受伤状态，播完自动回空状态。
+/// - isDead(Bool)：死亡标记，true 时 AnyState → HurtLayer 的 ksmDie1，false 时 ksmDie1 → Exit 退回基础层。
+///   由 <see cref="SetDead"/> 写入（死亡那一刻一次 + 组件启用时同步一次），bool 不需要每帧刷新。
 ///
 /// velocityY、isGround 与 IsCrouching 必须每帧都写：漏写时混合树会停在默认值 velocityY = 0（最高点姿势），
 /// 而 isGround 一直是 false 时角色永远不会从空中状态落回；IsCrouching 漏写则蹲下动画不触发。
@@ -49,6 +51,13 @@ public class PlayerAnimatorView : MonoBehaviour
 
     /// <summary>Animator 的 hurt 触发器哈希（ksm.controller 中新增的参数）：AnyState → HurtLayer 的受伤状态。</summary>
     private static readonly int HurtParam = Animator.StringToHash("hurt");
+
+    /// <summary>
+    /// Animator 的死亡标记哈希（ksm.controller 中新增的参数）：true 时 AnyState → HurtLayer 的
+    /// ksmDie1 死亡状态（Override 层，权重 1，会盖住基础层的 locomotion）；false 时 ksmDie1 → Exit，
+    /// 基础层自动接回。bool 参数会一直保留在 Animator 上，不需要每帧刷新。
+    /// </summary>
+    private static readonly int IsDeadParam = Animator.StringToHash("isDead");
 
     /// <summary>受伤状态名（ksm.controller 的 HurtLayer → ksmHurt2）的哈希，用于判断"是否已经在播受伤动画"。</summary>
     private static readonly int HurtStateHash = Animator.StringToHash("ksmHurt2");
@@ -95,7 +104,15 @@ public class PlayerAnimatorView : MonoBehaviour
         // 先摘再挂，避免组件被重复 Enable 时挂上两份。
         if (state == null)
             state = GetComponent<CharacterState>();
-        if (state == null || onTakeDamage == null)
+        if (state == null)
+            return;
+
+        // 死亡标记每次启用都同步一次（进去对着 state 的当前状态写，而不是假设从 false 开始）：
+        // 组件被反复 Enable / 场景重载 / domain reload 时，Animator 参数可能残留上一次的值，
+        // 不同步就会出现「人还好好的却在播死亡动画」。
+        SetDead(state.IsDead);
+
+        if (onTakeDamage == null)
             return;
 
         state.OnTakeDamage.RemoveListener(onTakeDamage);
@@ -140,6 +157,19 @@ public class PlayerAnimatorView : MonoBehaviour
             return;
 
         animator.SetFloat(SpeedParam, Mathf.Abs(horizontalVelocity));
+    }
+
+    /// <summary>
+    /// 写死亡标记（ksm.controller 的 isDead → HurtLayer 的 ksmDie1）。
+    /// 唯一的写入口在这一个方法里——**别的组件不许直接碰 Animator 的 bool 参数**，
+    /// 保持「所有 Animator 写入集中在 PlayerAnimatorView」的分层。
+    /// 由 <see cref="PlayerController.PlayerDead"/> 在 HP 归零那一帧调用一次；
+    /// 参数本身不需要每帧刷新（bool 会一直留在 Animator 上）。
+    /// </summary>
+    public void SetDead(bool dead)
+    {
+        if (animator != null)
+            animator.SetBool(IsDeadParam, dead);
     }
 
     /// <summary>触发一次闪避（ksm.controller 的 AnyState → sprint）。</summary>
