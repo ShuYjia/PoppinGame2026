@@ -1,8 +1,8 @@
 # UNITY_MCP.md — 修改/测试代码前的 Unity MCP 连接检测规程
 
-> **硬性规则：任何涉及修改、编译、测试 Unity 代码 / 场景 / Prefab 的任务，第一步（在读文件、写文件、跑命令之前）必须先检测 Unity MCP 是否连接。检测结果决定后续工作方式。**
->
-> 原因：连接不通时盲改文件 = 改动无法验证，直接违反 `AGENTS.md` 中"无法运行 Unity 验证时，明确说明未验证项"的约定。
+本规程仅在用户本轮对话要求使用 Unity MCP 时适用。用户明确说不需要 MCP 时，跳过连接检测与 MCP 调用，并在交付中列出因此未做的验证；未说明时不主动调用，如任务安全完成确实依赖 MCP 则先询问。
+
+用户要求使用 MCP 时，在修改或测试 Unity 代码、场景、Prefab 前先完成本规程的连接检测，并按检测结果决定后续方式。
 
 ---
 
@@ -11,11 +11,11 @@
 | 项 | 值 |
 |---|---|
 | 服务 | MCPForUnity（Unity 编辑器内置窗口 "MCP for Unity"） |
-| 端点 | `http://127.0.0.1:8081/mcp` |
-| WorkBuddy 侧注册 | `~/.workbuddy/mcp.json` → `unityMCP`（`type: http`，url 指向上面的端点） |
+| 端点 | `http://127.0.0.1:8082/mcp` |
+| WorkBuddy 侧注册 | 用户环境配置：`~/.workbuddy/mcp.json` → `unityMCP`（`type: http`，url 指向上面的端点；未经用户要求不主动修改） |
 | 协议 | MCP over HTTP，SSE 响应；会话号在响应头 `mcp-session-id` |
 
-**端口以 Unity 编辑器 "MCP for Unity" 窗口里显示的 HTTP URL 为准**（本项目 "My project" 当前为 8081；2026-10-16 实测 8080 已无人监听）。端口变了要同步更新 `~/.workbuddy/mcp.json` 和本文件。
+**端口以 Unity 编辑器 "MCP for Unity" 窗口里显示的 HTTP URL 为准**（本项目 "Poppin" 当前为 8082；另一个 Unity 项目使用 8081）。端口变化时先由用户确认项目实际端口；仓库内配置按用户要求更新。`~/.workbuddy/mcp.json` 属于用户环境配置，除非用户明确要求，不由本项目任务自动修改。
 
 注意：注册了 ≠ 本会话能用。会话工具列表里有没有 `mcp__unityMCP__*` 工具，取决于连接器管理页是否点了 **Trust**。没暴露时用第 3 节的裸 JSON-RPC 客户端兜底。
 
@@ -30,13 +30,13 @@
 ### Step 2 — 探端口（工具未暴露时）
 
 ```bash
-curl -s -m 5 -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8081/mcp
+curl -s -m 5 -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8082/mcp
 ```
 
 | 返回 | 含义 | 处置 |
 |---|---|---|
 | `406` | 服务在线（只是 curl 没带 Accept 头） | 进入 Step 3 握手，之后用裸客户端 |
-| `000` / 连接失败 | Unity 没开 / MCPForUnity 没启用 / 端口变了 | **停止一切改动**，按第 4 节处置 |
+| `000` / 连接失败 | Unity 没开 / MCPForUnity 没启用 / 端口变了 | 若本轮要求 MCP，按第 4 节处置；否则按用户指示继续或说明验证限制 |
 
 ### Step 3 — 完整握手验证（跑 Play 模式测试前必做）
 
@@ -46,7 +46,7 @@ curl -s -m 5 -o /dev/null -w "%{http_code}\n" http://127.0.0.1:8081/mcp
 # check_unity_mcp.py —— 退出码 0 且输出 count>=1 即连接正常
 import json, sys, urllib.request, urllib.error
 
-URL = "http://127.0.0.1:8081/mcp"
+URL = "http://127.0.0.1:8082/mcp"
 
 def post(payload, sid=None):
     req = urllib.request.Request(URL, data=json.dumps(payload).encode(), method="POST")
@@ -96,7 +96,7 @@ sys.exit(0 if code2 == 200 and tools else 1)
 |---|---|
 | 会话内有 unityMCP 工具 | 直接调用工具 |
 | 406 + 握手成功，但工具未暴露 | 用裸 JSON-RPC 客户端直连（规则见下） |
-| `000` / 握手失败 | **先不写文件**：报告检测结果、引导检查，并按第 4 节询问用户是否在无 MCP 情况下继续；经用户明确确认后才允许离线修改 |
+| `000` / 握手失败 | 报告检测结果与验证限制；若用户已明确要求无 MCP 工作，按其要求继续；否则询问是否离线继续，未经确认不进行依赖 MCP 验证的修改 |
 
 ### 裸 JSON-RPC 客户端调用规则（踩过的坑，必须遵守）
 
@@ -115,13 +115,13 @@ sys.exit(0 if code2 == 200 and tools else 1)
 
 1. **不要盲改文件。** 先向用户报告检测结果（失败步骤、返回码），再引导依次检查：
    - Unity 编辑器是否开着、项目是否就是本仓库（Poppin）；
-   - 编辑器里 **MCP for Unity** 窗口是否打开，HTTP URL 端口是否仍是 8081；
+   - 编辑器里 **MCP for Unity** 窗口是否打开，HTTP URL 端口是否仍是 8082；
    - 需要时点窗口里的 Refresh / 重新启用。
-2. 端口若变了：以编辑器窗口显示的 URL 为准，同步更新 `~/.workbuddy/mcp.json` 中 `unityMCP.url` 与本文件第 1 节。
+2. 端口若变了：以编辑器窗口显示的 URL 为准；仓库文档仅在用户要求时更新。用户环境中的 `~/.workbuddy/mcp.json` 不自动修改，需用户明确要求。
 3. 想在本会话直接使用工具（而非裸客户端）：连接器管理页 → 对 `unityMCP` 点 **Trust**。不 Trust 也能干活，只是走第 3 节兜底通道。
-4. **询问用户是否要在没有 MCP 的情况下修改**（二选一，必须拿到明确答复后才能动手）：
-   - **继续（无 MCP 修改）**：允许离线改动，但本次交付必须按 `AGENTS.md` 逐条标注"未验证项"（哪些编译 / Console / Play 验证没做）；改动只限本任务文件；离线改动**不得作为验收 checkpoint 提交**，确需存盘只能用 `WIP:` 前缀且不得推送远程。
-   - **暂停**：停在只读检查状态，等工作区恢复 MCP 连接后再继续；不写任何项目文件。
+4. 用户未预先说明是否允许无 MCP 工作时，询问是离线继续还是暂停；若用户已明确不需要 MCP，则无需重复询问。
+   - **继续（无 MCP 修改）**：允许离线改动，但交付必须列明未执行的编译 / Console / Play 验证。是否满足验收条件按用户给出的验收标准判断；提交仍须遵守 `GIT_WORKFLOW.md` 的授权流程。
+   - **暂停**：停在只读检查状态，等工作区恢复 MCP 连接后再继续；不写项目文件。
 
 ---
 
