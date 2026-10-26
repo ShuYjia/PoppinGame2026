@@ -54,6 +54,13 @@ using UnityEngine.Events;
 /// </summary>
 public class CharacterState : MonoBehaviour
 {
+    [Header("UI 广播（ScriptableObject 事件通道，Inspector 里挂 SO 的 RaisedEvent）")]
+    [Tooltip("HP 发生变化时触发（含初始同步），参数为本组件。Inspector 里挂 CharacterEventSO.RaisedEvent，\n由 UIManager 订阅该 SO 后刷新血条；敌人不挂就不会广播。")]
+    public UnityEvent<CharacterState> OnHealthChange;
+
+    [Tooltip("SP 发生变化时触发（含初始同步），参数为本组件。Inspector 里挂 PowerEventSO.RaisedEvent，\n由 UIManager 订阅该 SO 后刷新体力条；体力每帧恢复会持续触发，挂了就会每帧刷新。")]
+    public UnityEvent<CharacterState> OnPowerChange;
+
     [Header("生命 HP")]
     [Tooltip("生命上限。策划案定稿 100；关卡内不自动回复（仅在 Saya 处回满）。")]
     public float maxHP = 100f;
@@ -115,6 +122,25 @@ public class CharacterState : MonoBehaviour
     /// <summary>HP 归零瞬间触发一次（复活后解除标记，直到再次死亡）。</summary>
     public event Action Died;
 
+    // ───────────────────────── 广播出口（C# event + SO 事件通道） ─────────────────────────
+
+    // 所有改 HP / SP 的地方一律通过这两个方法广播，保证两条出口不会漏发；
+    // 新增数值入口时接这里，不要各处单独 Invoke（教训：加新状态出口必须搜齐所有读取点）。
+
+    /// <summary>HP 变化后的统一广播出口：C# event（代码订阅）与 OnHealthChange（SO 事件通道）一起触发。</summary>
+    private void NotifyHealthChanged()
+    {
+        HealthChanged?.Invoke(CurrentHP, maxHP);
+        OnHealthChange?.Invoke(this);
+    }
+
+    /// <summary>SP 变化后的统一广播出口：C# event（代码订阅）与 OnPowerChange（SO 事件通道）一起触发。</summary>
+    private void NotifyStaminaChanged()
+    {
+        StaminaChanged?.Invoke(CurrentSP, maxSP);
+        OnPowerChange?.Invoke(this);
+    }
+
     /// <summary>伤害来源 ID → 该来源剩余的无敌时间（秒）。来源按 GameObject 归一，见 <see cref="GetSourceKey"/>。</summary>
     private readonly Dictionary<int, float> invincibilityTimers = new Dictionary<int, float>();
 
@@ -166,7 +192,12 @@ public class CharacterState : MonoBehaviour
         CurrentHP = maxHP;
         CurrentSP = maxSP;
     }
-
+    private void Start()
+    {
+        // 初始同步：UI 进场时先刷一次当前值（无条件广播，即使满值）。
+        OnHealthChange?.Invoke(this);
+        OnPowerChange?.Invoke(this);
+    }
     private void Update()
     {
         // 体力自动恢复：每帧结算一次（帧口径），并按 60fps 基准换算时长。
@@ -331,7 +362,7 @@ public class CharacterState : MonoBehaviour
         float before = CurrentSP;
         CurrentSP = Mathf.Max(0f, CurrentSP - amount);
         if (!Mathf.Approximately(before, CurrentSP))
-            StaminaChanged?.Invoke(CurrentSP, maxSP);
+            NotifyStaminaChanged();
     }
 
     /// <summary>恢复体力（道具 / 技能等来源），不超过上限。</summary>
@@ -343,7 +374,7 @@ public class CharacterState : MonoBehaviour
         float before = CurrentSP;
         CurrentSP = Mathf.Min(maxSP, CurrentSP + amount);
         if (!Mathf.Approximately(before, CurrentSP))
-            StaminaChanged?.Invoke(CurrentSP, maxSP);
+            NotifyStaminaChanged();
     }
 
     /// <summary>
@@ -379,8 +410,8 @@ public class CharacterState : MonoBehaviour
         if (attacker == null)
             return false;
 
-        // 事件由带来源重载统一触发（真正扣血之后），这里不再单独 Invoke——
-        // 否则无敌帧挡下的伤害也会播受伤动画 / 触发击退。
+        // 事件全部由带来源重载统一触发（真正扣血之后）——在这里提前广播会让 UI
+        // 读到扣血前的旧值，被无敌挡下时也会白刷一次。
         return TakeDamage(attacker.damage, attacker);
     }
 
@@ -446,7 +477,7 @@ public class CharacterState : MonoBehaviour
         float before = CurrentHP;
         CurrentHP = Mathf.Max(0f, CurrentHP - amount);
         if (!Mathf.Approximately(before, CurrentHP))
-            HealthChanged?.Invoke(CurrentHP, maxHP);
+            NotifyHealthChanged();
 
         if (CurrentHP <= 0f)
         {
@@ -469,7 +500,7 @@ public class CharacterState : MonoBehaviour
         float before = CurrentHP;
         CurrentHP = Mathf.Min(maxHP, CurrentHP + amount);
         if (!Mathf.Approximately(before, CurrentHP))
-            HealthChanged?.Invoke(CurrentHP, maxHP);
+            NotifyHealthChanged();
 
         if (CurrentHP > 0f)
             IsDead = false;
@@ -489,9 +520,9 @@ public class CharacterState : MonoBehaviour
         globalInvincibleHold = false;
 
         if (hpChanged)
-            HealthChanged?.Invoke(CurrentHP, maxHP);
+            NotifyHealthChanged();
         if (spChanged)
-            StaminaChanged?.Invoke(CurrentSP, maxSP);
+            NotifyStaminaChanged();
     }
 
     // ───────────────────────── 成长扩展点（占位，逻辑留空） ─────────────────────────
