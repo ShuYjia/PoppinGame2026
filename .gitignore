@@ -89,3 +89,6 @@ crashlytics-build.properties
 /otae_idle/
 /otae_idle_ref/
 /otae_idle_v2/
+
+# 临时排查脚本/预览产物（agent 工作暂存，非 Unity 资产）
+/_doc_inspect/
