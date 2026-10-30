@@ -339,6 +339,9 @@ public class PlayerController : MonoBehaviour
     // 标记为 true 后 IsDead 也会同步为真，所以不能用 IsDead 兼做幂等——那样死亡瞬间自己就把自己挡掉了。
     private bool deathHandled;
 
+    // 输入锁（通关结算 / 过场时由 LevelManager 置真）：见 SetInputLocked。
+    private bool inputLocked;
+
     // ─────────────────────────────── 生命周期 ───────────────────────────────
 
     private void Awake()
@@ -490,6 +493,24 @@ public class PlayerController : MonoBehaviour
         // 这里也不能去「刷新动画」：地面/空中参数停在死亡瞬间的状态，角色按当时的姿态倒下。
         if (IsDead)
             return;
+
+        // 输入锁（通关结算 / 过场）：当作所有键都松开——角色按正常减速停下、动画照常刷新，
+        // 但不再采样移动 / 跳跃 / 闪避 / 攻击 / 蹲下。
+        if (inputLocked)
+        {
+            InputDirection = Vector2.zero;
+            crouchInput = false;
+            walkInput = false;
+            crouchInputPrev = false;
+            dodgeInputPrev = false;
+            attackInputPrev = false;
+            if (!IsHurt)
+                SetCrouching(false);
+            if (state != null)
+                state.SetCrouching(IsCrouching);
+            UpdateAnimation();
+            return;
+        }
 
         InputDirection = inputControl.GamePlay.Move.ReadValue<Vector2>();
         // 方向键向下或 C 蹲下；Ctrl 是走路键，不再触发蹲下。
@@ -1251,6 +1272,69 @@ public class PlayerController : MonoBehaviour
         // 4) Animator 只有一个出口——PlayerAnimatorView（本组件从不直接碰 Animator）。
         if (animatorView != null)
             animatorView.SetDead(true);
+    }
+
+    // ───────────────────────────── 复活 / 输入锁（关卡流程用） ─────────────────────────────
+
+    /// <summary>
+    /// 在 position 处复活（LevelManager 在死亡后 / 开场时调用）：把 <see cref="PlayerDead"/> 做过的事逐条还原——
+    /// HP / SP 回满并清死亡标记、解除横向锁死、重新启用 GamePlay 输入、动画退出死亡状态，
+    /// 同时清掉所有进行中的动作状态，保证复活后是一个干净的站立角色。
+    /// 活着时调用也安全（等价于瞬移 + 回满）。
+    /// </summary>
+    public void Respawn(Vector2 position)
+    {
+        if (state != null)
+            state.ResetToFull();
+        deathHandled = false;
+
+        IsDodging = false;
+        dodgeTimer = 0f;
+        dodgeCooldownTimer = 0f;
+        diveLatch = false;
+        attackTimer = 0f;
+        attackCooldownTimer = 0f;
+        airAttackCutPending = false;
+        jumpBufferTimer = 0f;
+        jumpCutPending = false;
+        isJumping = false;
+        coyoteTimer = 0f;
+        runLocked = false;
+        EndHurt();
+        if (state != null)
+            state.HoldGlobalInvincible(false);
+
+        if (rb != null)
+        {
+            // 只摘掉死亡时加的 X 轴冻结，保留 FreezeRotation 等原有约束。
+            rb.constraints &= ~RigidbodyConstraints2D.FreezePositionX;
+            rb.velocity = Vector2.zero;
+            rb.position = position;
+        }
+        transform.position = new Vector3(position.x, position.y, transform.position.z);
+
+        if (inputControl != null && !inputLocked)
+            inputControl.GamePlay.Enable();
+        if (animatorView != null)
+            animatorView.SetDead(false);
+    }
+
+    /// <summary>输入锁是否生效（通关结算 / 过场中）。</summary>
+    public bool InputLocked => inputLocked;
+
+    /// <summary>
+    /// 锁定 / 解锁玩家输入。锁定期间角色当作所有键松开（自然减速停下，动画照常），
+    /// 死亡流程不受影响。由 LevelManager 在通关时调用。
+    /// </summary>
+    public void SetInputLocked(bool locked)
+    {
+        inputLocked = locked;
+        if (inputControl == null || IsDead)
+            return;
+        if (locked)
+            inputControl.GamePlay.Disable();
+        else
+            inputControl.GamePlay.Enable();
     }
 
     // ───────────────────────────── 编辑器辅助 ─────────────────────────────
