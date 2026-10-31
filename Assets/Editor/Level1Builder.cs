@@ -17,7 +17,7 @@ using UnityEngine.UI;
 /// 2. 以 FirstLevel 为模板「另存为」Assets/Scenes/Level1.unity（FirstLevel 本身不改）；
 /// 3. 生成预制体到 Assets/Prefabs/Level/（Boar / Star / Heart / Spikes / Checkpoint / Sign / Goal）；
 /// 4. 按下面的字符地图铺地形（九宫格自动选边角）、摆放敌人 / 拾取物 / 机关 / 存档点 / 终点；
-/// 5. 加上 LevelManager、跟随相机、死亡区、左右边界墙、关卡 HUD 与结算面板；
+/// 5. 加上 LevelManager、跟随相机、死亡区、左右边界墙、关卡 HUD、结算面板与暂停菜单；
 /// 6. 把 Level1 加进 Build Settings（重开关卡要用）。
 ///
 /// **注意：重跑会覆盖 Level1.unity**。开始在 Level1 里手工摆东西之后，就别再用它重建了——
@@ -738,6 +738,46 @@ public static class Level1Builder
         hud.resultHint.color = new Color(0.75f, 0.75f, 0.8f);
 
         hud.resultPanel = panel;
+        panel.SetActive(false);
+
+        BuildPauseMenu(hudGo.transform);
+    }
+
+    /// <summary>暂停菜单（PauseMenu）：放在 HUD 最后，盖在所有 HUD 元素上面。</summary>
+    private static void BuildPauseMenu(Transform parent)
+    {
+        GameObject root = NewUI("PauseMenu", parent);
+        Stretch(root.GetComponent<RectTransform>());
+        PauseMenu menu = root.AddComponent<PauseMenu>();
+
+        GameObject panel = NewUI("PausePanel", root.transform);
+        Stretch(panel.GetComponent<RectTransform>());
+        panel.AddComponent<Image>().color = new Color(0f, 0f, 0f, 0.6f);
+
+        GameObject box = NewUI("Box", panel.transform);
+        RectTransform br = box.GetComponent<RectTransform>();
+        br.anchorMin = br.anchorMax = br.pivot = new Vector2(0.5f, 0.5f);
+        br.sizeDelta = new Vector2(640f, 520f);
+        box.AddComponent<Image>().color = new Color(0.13f, 0.11f, 0.2f, 0.96f);
+
+        TMP_Text title = NewCentered("Title", box.transform, 72f, new Vector2(0f, 175f), new Vector2(600f, 100f));
+        title.text = "暂停";
+        title.color = new Color(1f, 0.85f, 0.3f);
+
+        string[] labels = { "继续游戏", "重新开始", "退出游戏" };
+        menu.items = new TMP_Text[labels.Length];
+        for (int i = 0; i < labels.Length; i++)
+        {
+            TMP_Text item = NewCentered("Item" + i, box.transform, 48f, new Vector2(0f, 50f - i * 80f), new Vector2(600f, 70f));
+            item.text = labels[i];
+            menu.items[i] = item;
+        }
+
+        TMP_Text hint = NewCentered("Hint", box.transform, 24f, new Vector2(0f, -210f), new Vector2(600f, 40f));
+        hint.text = "↑↓ 选择    Enter / Ⓐ 确认    Esc / Ⓑ 返回";
+        hint.color = new Color(0.62f, 0.62f, 0.7f);
+
+        menu.panel = panel;
         panel.SetActive(false);
     }
 
