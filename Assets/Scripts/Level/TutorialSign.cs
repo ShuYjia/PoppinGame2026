@@ -6,8 +6,8 @@ using UnityEngine;
 /// 第一次读到时计 signScore 分（策划案 4.3.2：纸条 / 告示板 10 分）。
 ///
 /// 需要：本物体上一个 isTrigger 的 Collider2D（就是「走近」的范围），子物体上一个 TextMeshPro 文本。
-/// 注意：项目当前的 TMP 字体（LiberationSans）不含中文，提示先用英文；
-/// 定了像素中文字体（策划案 8.3 待补）之后换字体资产即可直接写中文。
+/// 文字用 Fusion Pixel 像素字体，可以直接写中文（TMP 默认字体缺字时也会自动回退到它）。
+/// 像素字体别用 &lt;b&gt; 粗体，重点词用 &lt;color&gt; 标出。
 /// </summary>
 public class TutorialSign : MonoBehaviour
 {

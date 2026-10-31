@@ -33,6 +33,10 @@ public static class Level1Builder
     private const string TileFolder = "Assets/mapTile/Tile";
     private const string ItemArt = "Assets/20/png/items";
     private const string PropArt = "Assets/20/png/tiles";
+    private const string UIFontPath = "Assets/Fonts/FusionPixel/FusionPixel-12px SDF.asset";
+
+    // 告示牌、HUD 用的像素字体（策划案 8.3）；Build() 开头加载，找不到时保留 TMP 默认字体。
+    private static TMP_FontAsset uiFont;
 
     private const int PlayerLayer = 6;
     private const int EnemyLayer = 7;
@@ -70,14 +74,19 @@ public static class Level1Builder
         "##########################################...##########....###########################################################....###################...########...#################################...##########################",
     };
 
+    // 重点词用颜色标出，不用 <b>：TMP 的假粗体会把像素字体糊成一团。
+    // 手柄键位写成 Xbox / PS 两种：Ⓐ = ×，Ⓨ = △，RB = R1（字体里没有 ✕，PS 叉键用 ×）。
+    private const string Key = "<color=#FFD54A>";
+    private const string EndKey = "</color>";
+
     private static readonly string[] SignMessages =
     {
-        "<b>Move</b>\nA / D   ·   Left Stick",
-        "<b>Jump</b>\nSpace   ·   (A) / Cross\nHold for a higher jump",
-        "<b>Run</b> and <b>jump</b>\nover the gap!",
-        "<b>Attack</b>\nJ   ·   (Y) / Triangle\nThe boar charges - hit it twice!",
-        "<b>Spikes!</b>  Jump over them\n<b>Dodge</b>  Shift   ·   R1 / RB\n(invincible while dodging)",
-        "The warehouse!\nEveryone is waiting inside",
+        Key + "移动" + EndKey + "\nA / D  ·  左摇杆",
+        Key + "跳跃" + EndKey + "\n空格  ·  Ⓐ / ×\n按住跳得更高",
+        Key + "助跑" + EndKey + "起跳，跳过这个坑！\n（手柄要把摇杆推到底才是跑）",
+        Key + "攻击" + EndKey + "\nJ  ·  Ⓨ / △\n野猪会冲过来，打它两下！",
+        "小心" + Key + "地刺" + EndKey + "，跳过去！\n" + Key + "闪避" + EndKey + "  Shift  ·  RB / R1\n闪避的时候不会受伤",
+        "仓库到了！\n大家都在里面等你",
     };
 
     // 九宫格草地在 JapSprites.png 里的位置（列, 行；行从图片顶部数，每格 16 像素）。
@@ -120,6 +129,10 @@ public static class Level1Builder
             return "Level1Builder: 字符地图每行长度不一致。";
 
         ImportBoarSprites();
+
+        uiFont = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(UIFontPath);
+        if (uiFont == null)
+            Debug.LogWarning("Level1Builder: 找不到像素字体 " + UIFontPath + "，文字改用 TMP 默认字体。");
 
         Scene scene = EditorSceneManager.OpenScene(TemplateScene, OpenSceneMode.Single);
         if (!EditorSceneManager.SaveScene(scene, LevelScene))
@@ -371,11 +384,16 @@ public static class Level1Builder
 
         GameObject hint = new GameObject("Hint");
         hint.transform.SetParent(go.transform, false);
-        hint.transform.localPosition = new Vector3(0f, 3.4f, 0f);
+        // 文字底边固定在离地 2.9 格（角色约 2.5 格高，站在牌子旁边不挡头），行数多了往上长。
+        hint.transform.localPosition = new Vector3(0f, 2.9f + 1.5f, 0f);
         TextMeshPro text = hint.AddComponent<TextMeshPro>();
+        if (uiFont != null)
+            text.font = uiFont;
         text.text = "Hint";
-        text.fontSize = 4f;
-        text.alignment = TextAlignmentOptions.Center;
+        // 5.625 = 字面 0.5625 格：1080p 下 1 格 64 像素，一个字体像素正好 3 个屏幕像素。
+        text.fontSize = 5.625f;
+        text.lineSpacing = 8f;
+        text.alignment = TextAlignmentOptions.Bottom;
         text.color = Color.white;
         text.rectTransform.sizeDelta = new Vector2(9f, 3f);
         text.enableWordWrapping = false;
@@ -672,6 +690,8 @@ public static class Level1Builder
         Stretch(hudGo.GetComponent<RectTransform>());
         LevelHUD hud = hudGo.AddComponent<LevelHUD>();
 
+        // 字号都取 12 的整数倍（Canvas 参考分辨率 1080p，像素字体 12px 一个字面），像素才落在整格上。
+
         // 右上角：星屑 / 分数 / 时间
         GameObject stats = NewUI("Stats", hudGo.transform);
         RectTransform sr = stats.GetComponent<RectTransform>();
@@ -682,13 +702,13 @@ public static class Level1Builder
         Image statsBg = stats.AddComponent<Image>();
         statsBg.color = new Color(0f, 0f, 0f, 0.35f);
 
-        hud.starsText = NewText("Stars", stats.transform, 34f, TextAlignmentOptions.Right, new Vector2(-20f, -12f), new Vector2(340f, 42f));
-        hud.scoreText = NewText("Score", stats.transform, 34f, TextAlignmentOptions.Right, new Vector2(-20f, -56f), new Vector2(340f, 42f));
-        hud.timeText = NewText("Time", stats.transform, 34f, TextAlignmentOptions.Right, new Vector2(-20f, -100f), new Vector2(340f, 42f));
+        hud.starsText = NewText("Stars", stats.transform, 36f, TextAlignmentOptions.Right, new Vector2(-20f, -12f), new Vector2(340f, 42f));
+        hud.scoreText = NewText("Score", stats.transform, 36f, TextAlignmentOptions.Right, new Vector2(-20f, -56f), new Vector2(340f, 42f));
+        hud.timeText = NewText("Time", stats.transform, 36f, TextAlignmentOptions.Right, new Vector2(-20f, -100f), new Vector2(340f, 42f));
         hud.starsText.color = new Color(1f, 0.85f, 0.3f);
 
         // 中上：提示条
-        hud.toastText = NewText("Toast", hudGo.transform, 44f, TextAlignmentOptions.Center, Vector2.zero, new Vector2(900f, 70f));
+        hud.toastText = NewText("Toast", hudGo.transform, 48f, TextAlignmentOptions.Center, Vector2.zero, new Vector2(900f, 70f));
         RectTransform tr = hud.toastText.rectTransform;
         tr.anchorMin = tr.anchorMax = new Vector2(0.5f, 1f);
         tr.pivot = new Vector2(0.5f, 1f);
@@ -705,16 +725,16 @@ public static class Level1Builder
         br.sizeDelta = new Vector2(920f, 640f);
         box.AddComponent<Image>().color = new Color(0.13f, 0.11f, 0.2f, 0.96f);
 
-        TMP_Text title = NewCentered("Title", box.transform, 76f, new Vector2(0f, 240f), new Vector2(860f, 100f));
-        title.text = "STAGE CLEAR!";
+        // 像素字体不用粗体（假粗体会把笔画糊在一起），靠字号和颜色区分层级。
+        TMP_Text title = NewCentered("Title", box.transform, 84f, new Vector2(0f, 240f), new Vector2(860f, 100f));
+        title.text = "通关！";
         title.color = new Color(1f, 0.85f, 0.3f);
-        title.fontStyle = FontStyles.Bold;
 
-        hud.resultBody = NewCentered("Body", box.transform, 38f, new Vector2(0f, 20f), new Vector2(760f, 300f));
+        hud.resultBody = NewCentered("Body", box.transform, 36f, new Vector2(0f, 20f), new Vector2(760f, 300f));
         hud.resultBody.alignment = TextAlignmentOptions.Left;
-        hud.resultTotal = NewCentered("Total", box.transform, 58f, new Vector2(0f, -185f), new Vector2(860f, 80f));
-        hud.resultTotal.fontStyle = FontStyles.Bold;
-        hud.resultHint = NewCentered("Hint", box.transform, 30f, new Vector2(0f, -265f), new Vector2(860f, 50f));
+        hud.resultTotal = NewCentered("Total", box.transform, 60f, new Vector2(0f, -185f), new Vector2(860f, 80f));
+        hud.resultTotal.color = new Color(1f, 0.85f, 0.3f);
+        hud.resultHint = NewCentered("Hint", box.transform, 24f, new Vector2(0f, -265f), new Vector2(860f, 50f));
         hud.resultHint.color = new Color(0.75f, 0.75f, 0.8f);
 
         hud.resultPanel = panel;
@@ -742,6 +762,8 @@ public static class Level1Builder
     {
         GameObject go = NewUI(name, parent);
         TextMeshProUGUI t = go.AddComponent<TextMeshProUGUI>();
+        if (uiFont != null)
+            t.font = uiFont;
         t.fontSize = size;
         t.alignment = align;
         t.color = Color.white;
