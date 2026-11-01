@@ -28,6 +28,10 @@ public class Attack : MonoBehaviour
     [Tooltip("造成实际伤害后是否销毁携带本组件的物体（子弹 = true；持续接触类如 Boar = false）。")]
     public bool destroyHostOnHit;
 
+    // 携带本组件的角色自己的状态（Boar 身上那份）；没有就是 null（音波、尖刺等）。
+    private CharacterState hostState;
+    private bool hostResolved;
+
     /// <summary>进入触发区即尝试结算一次（子弹类一次性命中）。</summary>
     private void OnTriggerEnter2D(Collider2D collision)
     {
@@ -47,7 +51,17 @@ public class Attack : MonoBehaviour
     /// <returns>是否真的造成了伤害。</returns>
     private bool TryHit(Collider2D collision)
     {
-        if (collision == null || damage <= 0f)
+        if (collision == null || damage <= 0f || !enabled)
+            return false;
+
+        // 携带者自己已经死了（比如被打死的 Boar）：尸体不再造成伤害。
+        // 注意禁用组件拦不住 OnTriggerStay2D（Unity 照样会发给禁用的脚本），所以这里要显式判断。
+        if (!hostResolved)
+        {
+            hostState = GetComponentInParent<CharacterState>();
+            hostResolved = true;
+        }
+        if (hostState != null && hostState.IsDead)
             return false;
 
         // 碰撞体可能在子物体上（玩家的碰撞体、敌人的部件），向上找角色状态组件。
