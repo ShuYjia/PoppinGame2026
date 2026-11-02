@@ -62,6 +62,15 @@ public partial class @PlayerInputControl: IInputActionCollection2, IDisposable
                     ""processors"": """",
                     ""interactions"": """",
                     ""initialStateCheck"": false
+                },
+                {
+                    ""name"": ""Interact"",
+                    ""type"": ""Button"",
+                    ""id"": ""4d1f8c33-5b64-4a1e-9a17-6f2c6d5a8e10"",
+                    ""expectedControlType"": ""Button"",
+                    ""processors"": """",
+                    ""interactions"": """",
+                    ""initialStateCheck"": false
                 }
             ],
             ""bindings"": [
@@ -304,6 +313,28 @@ public partial class @PlayerInputControl: IInputActionCollection2, IDisposable
                     ""processors"": """",
                     ""groups"": "";Gamepad"",
                     ""action"": ""Jump"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""7c2e91a4-3f58-4c0d-8b21-9d5e7f1a4b62"",
+                    ""path"": ""<Keyboard>/e"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": "";Keyboard&Mouse"",
+                    ""action"": ""Interact"",
+                    ""isComposite"": false,
+                    ""isPartOfComposite"": false
+                },
+                {
+                    ""name"": """",
+                    ""id"": ""b93f4d15-2c7a-4e68-9f30-1a8c5d6e7b04"",
+                    ""path"": ""<Gamepad>/buttonEast"",
+                    ""interactions"": """",
+                    ""processors"": """",
+                    ""groups"": "";Gamepad"",
+                    ""action"": ""Interact"",
                     ""isComposite"": false,
                     ""isPartOfComposite"": false
                 }
@@ -895,6 +926,7 @@ public partial class @PlayerInputControl: IInputActionCollection2, IDisposable
         m_GamePlay_Look = m_GamePlay.FindAction("Look", throwIfNotFound: true);
         m_GamePlay_Fire = m_GamePlay.FindAction("Fire", throwIfNotFound: true);
         m_GamePlay_Jump = m_GamePlay.FindAction("Jump", throwIfNotFound: true);
+        m_GamePlay_Interact = m_GamePlay.FindAction("Interact", throwIfNotFound: true);
         // UI
         m_UI = asset.FindActionMap("UI", throwIfNotFound: true);
         m_UI_Navigate = m_UI.FindAction("Navigate", throwIfNotFound: true);
@@ -972,6 +1004,7 @@ public partial class @PlayerInputControl: IInputActionCollection2, IDisposable
     private readonly InputAction m_GamePlay_Look;
     private readonly InputAction m_GamePlay_Fire;
     private readonly InputAction m_GamePlay_Jump;
+    private readonly InputAction m_GamePlay_Interact;
     public struct GamePlayActions
     {
         private @PlayerInputControl m_Wrapper;
@@ -980,6 +1013,7 @@ public partial class @PlayerInputControl: IInputActionCollection2, IDisposable
         public InputAction @Look => m_Wrapper.m_GamePlay_Look;
         public InputAction @Fire => m_Wrapper.m_GamePlay_Fire;
         public InputAction @Jump => m_Wrapper.m_GamePlay_Jump;
+        public InputAction @Interact => m_Wrapper.m_GamePlay_Interact;
         public InputActionMap Get() { return m_Wrapper.m_GamePlay; }
         public void Enable() { Get().Enable(); }
         public void Disable() { Get().Disable(); }
@@ -1001,6 +1035,9 @@ public partial class @PlayerInputControl: IInputActionCollection2, IDisposable
             @Jump.started += instance.OnJump;
             @Jump.performed += instance.OnJump;
             @Jump.canceled += instance.OnJump;
+            @Interact.started += instance.OnInteract;
+            @Interact.performed += instance.OnInteract;
+            @Interact.canceled += instance.OnInteract;
         }
 
         private void UnregisterCallbacks(IGamePlayActions instance)
@@ -1017,6 +1054,9 @@ public partial class @PlayerInputControl: IInputActionCollection2, IDisposable
             @Jump.started -= instance.OnJump;
             @Jump.performed -= instance.OnJump;
             @Jump.canceled -= instance.OnJump;
+            @Interact.started -= instance.OnInteract;
+            @Interact.performed -= instance.OnInteract;
+            @Interact.canceled -= instance.OnInteract;
         }
 
         public void RemoveCallbacks(IGamePlayActions instance)
@@ -1203,6 +1243,7 @@ public partial class @PlayerInputControl: IInputActionCollection2, IDisposable
         void OnLook(InputAction.CallbackContext context);
         void OnFire(InputAction.CallbackContext context);
         void OnJump(InputAction.CallbackContext context);
+        void OnInteract(InputAction.CallbackContext context);
     }
     public interface IUIActions
     {

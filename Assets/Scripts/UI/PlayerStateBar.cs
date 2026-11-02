@@ -1,3 +1,4 @@
+using TMPro;
 using UnityEngine;
 using UnityEngine.UI;
 
@@ -17,10 +18,19 @@ public class PlayerStateBar : MonoBehaviour
     [Header("体力条")]
     public Image powerImage;         // 黄条：当前 SP
 
-    /// <summary>UIManager 在 HP 变化时调用：只更新绿条，红条由 Update 每帧自行收敛过去。</summary>
+    [Header("血量数值")]
+    [Tooltip("显示「当前血量 / 最大血量」的 TMP 文本（HealthBar/AccurateHealth）。\n未赋值时静默跳过——FirstLevel 场景（合作者在改）里就是这个状态，不能因为少一个引用让每次掉血都抛异常。")]
+    public TextMeshProUGUI accurateHealth;
+
+    /// <summary>UIManager 在 HP 变化时调用：更新绿条与数值文本，红条由 Update 每帧自行收敛过去。</summary>
     public void SetHealth(float current, float max)
     {
         healthImage.fillAmount = max <= 0f ? 0f : Mathf.Clamp01(current / max);
+
+        // 数值文本：显示「当前 / 上限」。判空是因为 FirstLevel 场景（合作者在改）里这个字段尚未接线，
+        // 少一个引用不该让每次掉血都抛 NullReferenceException。
+        if (accurateHealth != null)
+            accurateHealth.text = Mathf.RoundToInt(current) + " / " + Mathf.RoundToInt(max);
     }
 
     /// <summary>UIManager 在 SP 变化时调用：传当前值与上限。</summary>
