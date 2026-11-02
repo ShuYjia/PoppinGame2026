@@ -1,5 +1,7 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
+using System.Linq;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
@@ -93,6 +95,17 @@ public class LevelManager : MonoBehaviour
     private int comboCount;
     private int currentComboBonus;
     private float completedAt;
+    private Checkpoint respawnCheckpoint;
+    private readonly HashSet<Checkpoint> checkpointsInRange = new HashSet<Checkpoint>();
+    private readonly HashSet<string> collectedIds = new HashSet<string>();
+    private readonly HashSet<string> defeatedEnemyIds = new HashSet<string>();
+    private readonly HashSet<string> readSignIds = new HashSet<string>();
+    private readonly HashSet<string> activatedCheckpointIds = new HashSet<string>();
+
+    /// <summary>The nearest checkpoint currently available for P-key saving.</summary>
+    public Checkpoint NearbyCheckpoint => FindNearestCheckpointInRange();
+
+    public string RespawnCheckpointId => respawnCheckpoint != null ? respawnCheckpoint.SaveId : string.Empty;
 
     [Serializable]
     public struct LevelResult
@@ -151,10 +164,21 @@ public class LevelManager : MonoBehaviour
             if (c.kind == Collectible.Kind.Star)
                 TotalStars++;
         }
+
+        ValidateSceneSaveIds();
+        if (SaveCoordinator.TryConsumePendingSnapshot(out LevelSnapshot snapshot))
+        {
+            string error;
+            if (!RestoreSnapshot(snapshot, out error))
+                Debug.LogError("存档读取失败：" + error, this);
+        }
     }
 
     private void Update()
     {
+        if (SaveCoordinator.IsOverlayOpen)
+            return;
+
         if (!IsCompleted)
             ElapsedTime += Time.deltaTime;
 
@@ -180,12 +204,31 @@ public class LevelManager : MonoBehaviour
         SignsRead++;
     }
 
+    public void RegisterReadSign(TutorialSign sign)
+    {
+        if (sign == null || !readSignIds.Add(sign.SaveId))
+            return;
+        SignsRead++;
+    }
+
+    public void RegisterCollected(Collectible collectible)
+    {
+        if (collectible != null)
+            collectedIds.Add(collectible.SaveId);
+    }
+
+    public void RegisterDefeatedEnemy(BoarController enemy)
+    {
+        if (enemy != null)
+            defeatedEnemyIds.Add(enemy.SaveId);
+    }
+
     /// <summary>敌人死亡时上报：基础分 + 连击加成。</summary>
     public void RegisterKill(int baseScore)
     {
         Kills++;
 
-        if (Time.time - lastKillTime <= comboWindow)
+        if (comboCount > 0 && Time.time - lastKillTime <= comboWindow)
         {
             comboCount++;
         }
@@ -208,11 +251,163 @@ public class LevelManager : MonoBehaviour
         KillPoints += baseScore + bonus;
     }
 
-    /// <summary>存档点被激活。</summary>
+    /// <summary>Called when the player enters a checkpoint; revisiting it updates the respawn point.</summary>
+    public void EnterCheckpoint(Checkpoint checkpoint)
+    {
+        if (checkpoint == null || player == null || player.IsDead)
+            return;
+
+        checkpointsInRange.Add(checkpoint);
+        bool newlyActivated = checkpoint.Activate();
+        activatedCheckpointIds.Add(checkpoint.SaveId);
+        respawnCheckpoint = checkpoint;
+        RespawnPoint = checkpoint.RespawnPosition;
+
+        if (newlyActivated)
+            CheckpointReached?.Invoke(RespawnPoint);
+    }
+
+    public void ExitCheckpoint(Checkpoint checkpoint)
+    {
+        if (checkpoint != null)
+            checkpointsInRange.Remove(checkpoint);
+    }
+
+    /// <summary>Compatibility entry point for callers that only know a respawn position.</summary>
     public void SetCheckpoint(Vector2 position)
     {
+        respawnCheckpoint = null;
         RespawnPoint = position;
         CheckpointReached?.Invoke(position);
+    }
+
+    public bool TryCaptureSnapshot(Checkpoint checkpoint, out LevelSnapshot snapshot, out string error)
+    {
+        snapshot = null;
+        error = string.Empty;
+        if (player == null || playerState == null)
+        {
+            error = "Player state is not ready.";
+            return false;
+        }
+        if (checkpoint == null || !checkpointsInRange.Contains(checkpoint))
+        {
+            error = "Move closer to a checkpoint before saving.";
+            return false;
+        }
+        if (player.IsDead || IsCompleted || IsRespawning)
+        {
+            error = "Saving is unavailable right now.";
+            return false;
+        }
+
+        EnterCheckpoint(checkpoint);
+        snapshot = new LevelSnapshot
+        {
+            scenePath = UnityEngine.SceneManagement.SceneManager.GetActiveScene().path,
+            playerPosition = player.transform.position,
+            respawnCheckpointId = checkpoint.SaveId,
+            hp = playerState.CurrentHP,
+            sp = playerState.CurrentSP,
+            elapsedTime = ElapsedTime,
+            stars = Stars,
+            kills = Kills,
+            killPoints = KillPoints,
+            comboBonus = ComboBonus,
+            signsRead = SignsRead,
+            deaths = Deaths,
+            comboCount = comboCount,
+            currentComboBonus = currentComboBonus,
+            secondsSinceLastKill = comboCount <= 0 ? -1f : Mathf.Max(0f, Time.time - lastKillTime),
+            collectedIds = SortedArray(collectedIds),
+            defeatedEnemyIds = SortedArray(defeatedEnemyIds),
+            readSignIds = SortedArray(readSignIds),
+            activatedCheckpointIds = SortedArray(activatedCheckpointIds)
+        };
+        return true;
+    }
+
+    public bool RestoreSnapshot(LevelSnapshot snapshot, out string error)
+    {
+        error = string.Empty;
+        if (snapshot == null)
+        {
+            error = "Save data is missing.";
+            return false;
+        }
+        if (player == null)
+        {
+            error = "Player is missing from this scene.";
+            return false;
+        }
+        if (snapshot.scenePath != SceneManager.GetActiveScene().path)
+        {
+            error = "Save data belongs to a different scene.";
+            return false;
+        }
+        if (snapshot.hp <= 0f || float.IsNaN(snapshot.hp) || float.IsInfinity(snapshot.hp))
+        {
+            error = "Save data has an invalid player health value.";
+            return false;
+        }
+
+        ReplaceSet(collectedIds, snapshot.collectedIds);
+        ReplaceSet(defeatedEnemyIds, snapshot.defeatedEnemyIds);
+        ReplaceSet(readSignIds, snapshot.readSignIds);
+        ReplaceSet(activatedCheckpointIds, snapshot.activatedCheckpointIds);
+
+        foreach (Collectible item in FindObjectsOfType<Collectible>(true))
+        {
+            if (collectedIds.Contains(item.SaveId))
+                item.RestoreCollectedFromSave();
+        }
+
+        foreach (BoarController enemy in FindObjectsOfType<BoarController>(true))
+        {
+            if (defeatedEnemyIds.Contains(enemy.SaveId))
+                enemy.RestoreDefeatedFromSave();
+        }
+
+        foreach (TutorialSign sign in FindObjectsOfType<TutorialSign>(true))
+        {
+            if (readSignIds.Contains(sign.SaveId))
+                sign.RestoreCountedFromSave();
+        }
+
+        Checkpoint restoredRespawnCheckpoint = null;
+        foreach (Checkpoint checkpoint in FindObjectsOfType<Checkpoint>(true))
+        {
+            bool activated = activatedCheckpointIds.Contains(checkpoint.SaveId);
+            checkpoint.RestoreActivatedFromSave(activated);
+            if (checkpoint.SaveId == snapshot.respawnCheckpointId)
+                restoredRespawnCheckpoint = checkpoint;
+        }
+
+        player.Respawn(snapshot.playerPosition);
+        playerState = player.GetComponent<CharacterState>();
+        if (playerState != null)
+            playerState.RestoreVitals(snapshot.hp, snapshot.sp);
+
+        ElapsedTime = Mathf.Max(0f, snapshot.elapsedTime);
+        Stars = Mathf.Max(0, snapshot.stars);
+        Kills = Mathf.Max(0, snapshot.kills);
+        KillPoints = Mathf.Max(0, snapshot.killPoints);
+        ComboBonus = Mathf.Max(0, snapshot.comboBonus);
+        SignsRead = Mathf.Max(0, snapshot.signsRead);
+        Deaths = Mathf.Max(0, snapshot.deaths);
+        comboCount = Mathf.Max(0, snapshot.comboCount);
+        currentComboBonus = Mathf.Max(0, snapshot.currentComboBonus);
+        lastKillTime = snapshot.secondsSinceLastKill < 0f
+            ? -999f
+            : Time.time - Mathf.Max(0f, snapshot.secondsSinceLastKill);
+        respawnCheckpoint = restoredRespawnCheckpoint;
+        RespawnPoint = restoredRespawnCheckpoint != null
+            ? restoredRespawnCheckpoint.RespawnPosition
+            : snapshot.playerPosition;
+
+        if (cameraFollow != null)
+            cameraFollow.SnapToTarget();
+        return true;
     }
 
     /// <summary>
@@ -312,6 +507,62 @@ public class LevelManager : MonoBehaviour
         }
 
         IsRespawning = false;
+    }
+
+    private Checkpoint FindNearestCheckpointInRange()
+    {
+        if (player == null || player.IsDead)
+            return null;
+
+        Checkpoint nearest = null;
+        float nearestDistance = float.MaxValue;
+        foreach (Checkpoint checkpoint in checkpointsInRange)
+        {
+            if (checkpoint == null || !checkpoint.isActiveAndEnabled || !checkpoint.HasPlayerNearby)
+                continue;
+
+            float distance = ((Vector2)checkpoint.transform.position - (Vector2)player.transform.position).sqrMagnitude;
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                nearest = checkpoint;
+            }
+        }
+
+        return nearest;
+    }
+
+    private void ValidateSceneSaveIds()
+    {
+        List<string> ids = new List<string>();
+        foreach (Collectible item in FindObjectsOfType<Collectible>(true))
+            ids.Add(item.SaveId);
+        foreach (BoarController enemy in FindObjectsOfType<BoarController>(true))
+            ids.Add(enemy.SaveId);
+        foreach (TutorialSign sign in FindObjectsOfType<TutorialSign>(true))
+            ids.Add(sign.SaveId);
+        foreach (Checkpoint checkpoint in FindObjectsOfType<Checkpoint>(true))
+            ids.Add(checkpoint.SaveId);
+
+        SaveIdentity.LogDuplicateIds(ids, this);
+    }
+
+    private static string[] SortedArray(HashSet<string> values)
+    {
+        return values.OrderBy(value => value, StringComparer.Ordinal).ToArray();
+    }
+
+    private static void ReplaceSet(HashSet<string> target, string[] values)
+    {
+        target.Clear();
+        if (values == null)
+            return;
+
+        for (int i = 0; i < values.Length; i++)
+        {
+            if (!string.IsNullOrWhiteSpace(values[i]))
+                target.Add(values[i]);
+        }
     }
 
     // ───────────────────────────── 输入 ─────────────────────────────

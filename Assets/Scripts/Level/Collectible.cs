@@ -21,6 +21,9 @@ public class Collectible : MonoBehaviour
     [Tooltip("Heart 回复的 HP。")]
     public float healAmount = 30f;
 
+    [SerializeField, Tooltip("可选的跨场景稳定存档 ID；留空时使用场景层级路径。")]
+    private string saveId;
+
     [Header("表现")]
     [Tooltip("上下浮动幅度（单位）。")]
     public float bobHeight = 0.15f;
@@ -35,6 +38,8 @@ public class Collectible : MonoBehaviour
     private bool collected;
     private float pickupTimer;
     private SpriteRenderer spriteRenderer;
+
+    public string SaveId => SaveIdentity.Resolve(this, saveId);
 
     private void Awake()
     {
@@ -104,7 +109,20 @@ public class Collectible : MonoBehaviour
         }
 
         collected = true;
+        if (LevelManager.Instance != null)
+            LevelManager.Instance.RegisterCollected(this);
         foreach (Collider2D c in GetComponents<Collider2D>())
             c.enabled = false;
+    }
+
+    public void RestoreCollectedFromSave()
+    {
+        collected = true;
+        foreach (Collider2D c in GetComponents<Collider2D>())
+        {
+            if (c != null)
+                c.enabled = false;
+        }
+        gameObject.SetActive(false);
     }
 }

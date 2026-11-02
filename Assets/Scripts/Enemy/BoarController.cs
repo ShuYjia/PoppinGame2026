@@ -89,6 +89,9 @@ public class BoarController : MonoBehaviour
     [Tooltip("美术是否朝右绘制。野猪素材朝左，保持 false。")]
     public bool spriteFacesRight;
 
+    [SerializeField, Tooltip("可选的跨场景稳定存档 ID；留空时使用场景层级路径。")]
+    private string saveId;
+
     // 序列帧片段名，与预制体上 SpriteSequencePlayer 的片段名对应。
     private const string ClipIdle = "Idle";
     private const string ClipWalk = "Walk";
@@ -99,6 +102,8 @@ public class BoarController : MonoBehaviour
 
     /// <summary>1 朝右，-1 朝左。</summary>
     public int Facing { get; private set; } = -1;
+
+    public string SaveId => SaveIdentity.Resolve(this, saveId);
 
     private Rigidbody2D rb;
     private CharacterState stats;
@@ -372,9 +377,17 @@ public class BoarController : MonoBehaviour
         PlayClip(ClipHit, true);
 
         if (LevelManager.Instance != null)
+        {
             LevelManager.Instance.RegisterKill(killScore);
+            LevelManager.Instance.RegisterDefeatedEnemy(this);
+        }
 
         StartCoroutine(FadeOutAndHide());
+    }
+
+    public void RestoreDefeatedFromSave()
+    {
+        gameObject.SetActive(false);
     }
 
     private System.Collections.IEnumerator FadeOutAndHide()

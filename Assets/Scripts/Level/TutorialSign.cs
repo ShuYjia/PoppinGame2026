@@ -21,9 +21,14 @@ public class TutorialSign : MonoBehaviour
     [Tooltip("淡入淡出速度（每秒透明度变化）。")]
     public float fadeSpeed = 6f;
 
+    [SerializeField, Tooltip("可选的跨场景稳定存档 ID；留空时使用场景层级路径。")]
+    private string saveId;
+
     private bool playerNear;
     private bool counted;
     private float alpha;
+
+    public string SaveId => SaveIdentity.Resolve(this, saveId);
 
     private void Awake()
     {
@@ -60,7 +65,7 @@ public class TutorialSign : MonoBehaviour
         {
             counted = true;
             if (LevelManager.Instance != null)
-                LevelManager.Instance.AddSign();
+                LevelManager.Instance.RegisterReadSign(this);
         }
     }
 
@@ -68,5 +73,10 @@ public class TutorialSign : MonoBehaviour
     {
         if (other.GetComponentInParent<PlayerController>() != null)
             playerNear = false;
+    }
+
+    public void RestoreCountedFromSave()
+    {
+        counted = true;
     }
 }
