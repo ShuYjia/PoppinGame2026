@@ -17,6 +17,7 @@ using UnityEngine.SceneManagement;
 /// 按键（键盘 + 手柄）：
 /// - 随时重开本关：R / 手柄 Select（PS: Share / Create，Xbox: View）
 /// - 结算面板确认重开：Enter / Space / J / 手柄南键（✕ / A）/ Start（Options / Menu）
+/// - 暂停菜单：Esc / 手柄 Start，见 <see cref="PauseMenu"/>（结算面板出现后不响应）
 ///
 /// 其他组件通过 <see cref="Instance"/> 上报事件（拾取、击杀、存档、掉坑、到终点），HUD 每帧读本组件的公开数值。
 /// </summary>
@@ -266,6 +267,10 @@ public class LevelManager : MonoBehaviour
     /// <summary>重新加载当前场景（场景不在 Build Settings 里时，编辑器下按路径加载兜底）。</summary>
     public void RestartLevel()
     {
+        // 暂停中按 R 重开时 timeScale 还是 0，LoadScene 不会自动恢复。
+        Time.timeScale = 1f;
+        AudioListener.pause = false;
+
         Scene scene = SceneManager.GetActiveScene();
         if (scene.buildIndex >= 0)
         {

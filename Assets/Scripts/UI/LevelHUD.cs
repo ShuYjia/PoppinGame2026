@@ -6,7 +6,7 @@ using UnityEngine;
 /// （策划案 4.3.6 建议：三块分数分开显示，玩家一眼能看出慢在哪、漏了什么）。
 ///
 /// 只读 <see cref="LevelManager"/> 的公开数值来显示，不改任何游戏状态。
-/// 文本先用英文：当前 TMP 字体不含中文（见 TutorialSign 的说明）。
+/// 字体是 Fusion Pixel 像素字体（Assets/Fonts/FusionPixel，由 Level1Builder 设置）。
 /// </summary>
 public class LevelHUD : MonoBehaviour
 {
@@ -61,17 +61,17 @@ public class LevelHUD : MonoBehaviour
             return;
 
         if (starsText != null)
-            starsText.text = $"STARS  {level.Stars} / {level.TotalStars}";
+            starsText.text = $"星屑  {level.Stars} / {level.TotalStars}";
         if (scoreText != null)
-            scoreText.text = $"SCORE  {level.RunningScore}";
+            scoreText.text = $"分数  {level.RunningScore}";
         if (timeText != null)
-            timeText.text = $"TIME  {FormatTime(level.ElapsedTime)}";
+            timeText.text = $"时间  {FormatTime(level.ElapsedTime)}";
 
         if (toastText != null)
         {
             if (level.IsRespawning)
             {
-                toastText.text = "Respawning...";
+                toastText.text = "复活中…";
                 toastTimer = 0.3f;
             }
             toastTimer -= Time.deltaTime;
@@ -83,7 +83,7 @@ public class LevelHUD : MonoBehaviour
     {
         if (toastText == null)
             return;
-        toastText.text = "Checkpoint!";
+        toastText.text = "已存档！";
         toastTimer = toastDuration;
     }
 
@@ -97,18 +97,19 @@ public class LevelHUD : MonoBehaviour
         if (resultBody != null)
         {
             // <pos> 做列对齐：比例字体下用空格对不齐。
-            string combo = r.comboBonus > 0 ? $"  <size=80%>(combo +{r.comboBonus})</size>" : string.Empty;
+            // 连击加成和死亡次数用灰色小一号（2/3 = 字号 24，仍是 12 的整数倍）。
+            string combo = r.comboBonus > 0 ? $"  <size=67%><color=#B0B0B0>连击 +{r.comboBonus}</color></size>" : string.Empty;
             resultBody.text =
-                $"Kills<pos=34%>{r.kills}{combo}<pos=78%>{r.killPoints}\n" +
-                $"Stars<pos=34%>{r.stars} / {r.totalStars}<pos=78%>{r.starPoints}\n" +
-                $"Signs<pos=34%>{r.signs}<pos=78%>{r.signPoints}\n" +
-                $"Time<pos=34%>{FormatTime(r.timeSeconds)}<pos=78%>{r.timeBonus}\n" +
-                $"<size=80%><color=#B0B0B0>Deaths<pos=34%>{r.deaths}</color></size>";
+                $"击杀<pos=30%>{r.kills}{combo}<pos=78%>{r.killPoints}\n" +
+                $"星屑<pos=30%>{r.stars} / {r.totalStars}<pos=78%>{r.starPoints}\n" +
+                $"告示牌<pos=30%>{r.signs}<pos=78%>{r.signPoints}\n" +
+                $"用时<pos=30%>{FormatTime(r.timeSeconds)}<pos=78%>{r.timeBonus}\n" +
+                $"<color=#B0B0B0>死亡<pos=30%>{r.deaths} 次</color>";
         }
         if (resultTotal != null)
-            resultTotal.text = $"TOTAL  {r.total}";
+            resultTotal.text = $"总分  {r.total}";
         if (resultHint != null)
-            resultHint.text = "Press  Enter / A (Cross)  to play again";
+            resultHint.text = "按 Enter 或手柄 Ⓐ / × 再玩一次";
     }
 
     private static string FormatTime(float seconds)
