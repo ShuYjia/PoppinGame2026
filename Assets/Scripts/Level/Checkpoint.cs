@@ -1,3 +1,4 @@
+using System.Globalization;
 using UnityEngine;
 
 /// <summary>
@@ -8,6 +9,8 @@ using UnityEngine;
 /// </summary>
 public class Checkpoint : MonoBehaviour
 {
+    [Tooltip("稳定存档 ID；留空时由场景位置生成。")]
+    public string saveId;
     [Tooltip("复活位置相对本物体的偏移（单位）。")]
     public Vector2 respawnOffset = new Vector2(0f, 0.1f);
     [Tooltip("未激活时的颜色。")]
@@ -16,6 +19,21 @@ public class Checkpoint : MonoBehaviour
     public Color activeColor = Color.white;
 
     public bool IsActive { get; private set; }
+
+    public string SaveId
+    {
+        get
+        {
+            if (!string.IsNullOrEmpty(saveId))
+                return saveId;
+
+            Vector3 p = transform.position;
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "checkpoint:{0:F3}:{1:F3}",
+                p.x, p.y);
+        }
+    }
 
     private SpriteRenderer spriteRenderer;
     private Vector3 baseScale;
@@ -54,11 +72,16 @@ public class Checkpoint : MonoBehaviour
         if (player == null || player.IsDead)
             return;
 
+        RestoreActive();
+        if (LevelManager.Instance != null)
+            LevelManager.Instance.SetCheckpoint(this, (Vector2)transform.position + respawnOffset);
+    }
+
+    public void RestoreActive()
+    {
         IsActive = true;
-        popTimer = 0f;
+        popTimer = -1f;
         if (spriteRenderer != null)
             spriteRenderer.color = activeColor;
-        if (LevelManager.Instance != null)
-            LevelManager.Instance.SetCheckpoint((Vector2)transform.position + respawnOffset);
     }
 }

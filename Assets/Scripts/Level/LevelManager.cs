@@ -1,5 +1,6 @@
 using System;
 using System.Collections;
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
@@ -93,6 +94,8 @@ public class LevelManager : MonoBehaviour
     private int comboCount;
     private int currentComboBonus;
     private float completedAt;
+    private string activeCheckpointId = string.Empty;
+    private readonly HashSet<string> collectedIds = new HashSet<string>();
 
     [Serializable]
     public struct LevelResult
@@ -151,6 +154,17 @@ public class LevelManager : MonoBehaviour
             if (c.kind == Collectible.Kind.Star)
                 TotalStars++;
         }
+
+        SaveData loaded = SaveManager.LoadActive();
+        if (loaded != null && loaded.initialized &&
+            string.Equals(loaded.sceneName, SceneManager.GetActiveScene().name, StringComparison.OrdinalIgnoreCase))
+        {
+            ApplySaveData(loaded);
+        }
+        else
+        {
+            InitializeNewSave();
+        }
     }
 
     private void Update()
@@ -173,6 +187,15 @@ public class LevelManager : MonoBehaviour
     public void AddStar()
     {
         Stars++;
+    }
+
+    public void RegisterCollected(Collectible collectible)
+    {
+        if (collectible == null)
+            return;
+
+        collectedIds.Add(collectible.SaveId);
+        SaveCurrentState();
     }
 
     public void AddSign()
@@ -211,8 +234,15 @@ public class LevelManager : MonoBehaviour
     /// <summary>存档点被激活。</summary>
     public void SetCheckpoint(Vector2 position)
     {
+        SetCheckpoint(null, position);
+    }
+
+    public void SetCheckpoint(Checkpoint checkpoint, Vector2 position)
+    {
+        activeCheckpointId = checkpoint != null ? checkpoint.SaveId : string.Empty;
         RespawnPoint = position;
         CheckpointReached?.Invoke(position);
+        SaveCurrentState();
     }
 
     /// <summary>
@@ -312,6 +342,97 @@ public class LevelManager : MonoBehaviour
         }
 
         IsRespawning = false;
+    }
+
+    private void InitializeNewSave()
+    {
+        activeCheckpointId = string.Empty;
+        collectedIds.Clear();
+        if (player != null)
+            RespawnPoint = player.transform.position;
+        SaveCurrentState();
+    }
+
+    private void ApplySaveData(SaveData data)
+    {
+        ElapsedTime = Mathf.Max(0f, data.elapsedTime);
+        Stars = Mathf.Max(0, data.stars);
+        Kills = Mathf.Max(0, data.kills);
+        KillPoints = Mathf.Max(0, data.killPoints);
+        ComboBonus = Mathf.Max(0, data.comboBonus);
+        SignsRead = Mathf.Max(0, data.signsRead);
+        Deaths = Mathf.Max(0, data.deaths);
+        activeCheckpointId = data.checkpointId ?? string.Empty;
+
+        collectedIds.Clear();
+        if (data.collectedIds != null)
+        {
+            for (int i = 0; i < data.collectedIds.Length; i++)
+            {
+                if (!string.IsNullOrEmpty(data.collectedIds[i]))
+                    collectedIds.Add(data.collectedIds[i]);
+            }
+        }
+
+        Vector2 savedPosition = new Vector2(data.playerX, data.playerY);
+        if (player != null)
+        {
+            player.Respawn(savedPosition);
+            if (playerState != null)
+                playerState.LoadState(data.hp, data.sp);
+        }
+
+        RespawnPoint = new Vector2(data.checkpointX, data.checkpointY);
+        if (string.IsNullOrEmpty(activeCheckpointId))
+            RespawnPoint = savedPosition;
+
+        Checkpoint[] checkpoints = FindObjectsOfType<Checkpoint>();
+        for (int i = 0; i < checkpoints.Length; i++)
+        {
+            if (checkpoints[i].SaveId == activeCheckpointId)
+            {
+                checkpoints[i].RestoreActive();
+                break;
+            }
+        }
+
+        Collectible[] collectibles = FindObjectsOfType<Collectible>();
+        for (int i = 0; i < collectibles.Length; i++)
+        {
+            if (collectedIds.Contains(collectibles[i].SaveId))
+                collectibles[i].RestoreCollected();
+        }
+    }
+
+    private void SaveCurrentState()
+    {
+        if (SaveManager.ActiveSlot < 0 || player == null)
+            return;
+
+        SaveData data = SaveManager.LoadActive();
+        if (data == null)
+            return;
+
+        data.initialized = true;
+        data.sceneName = SceneManager.GetActiveScene().name;
+        data.levelName = SceneManager.GetActiveScene().name == "Level1" ? "Level 1" : SceneManager.GetActiveScene().name;
+        data.checkpointId = activeCheckpointId;
+        data.checkpointX = RespawnPoint.x;
+        data.checkpointY = RespawnPoint.y;
+        data.playerX = player.transform.position.x;
+        data.playerY = player.transform.position.y;
+        data.hp = playerState != null ? playerState.CurrentHP : 0f;
+        data.sp = playerState != null ? playerState.CurrentSP : 0f;
+        data.elapsedTime = ElapsedTime;
+        data.stars = Stars;
+        data.kills = Kills;
+        data.killPoints = KillPoints;
+        data.comboBonus = ComboBonus;
+        data.signsRead = SignsRead;
+        data.deaths = Deaths;
+        data.totalScore = RunningScore;
+        data.collectedIds = new List<string>(collectedIds).ToArray();
+        SaveManager.Save(data);
     }
 
     // ───────────────────────────── 输入 ─────────────────────────────

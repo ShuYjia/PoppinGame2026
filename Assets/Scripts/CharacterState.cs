@@ -525,6 +525,19 @@ public class CharacterState : MonoBehaviour
             NotifyStaminaChanged();
     }
 
+    /// <summary>从存档恢复 HP / SP，并清理旧的死亡与无敌状态。</summary>
+    public void LoadState(float hp, float sp)
+    {
+        CurrentHP = Mathf.Clamp(hp, 0f, maxHP);
+        CurrentSP = Mathf.Clamp(sp, 0f, maxSP);
+        IsDead = CurrentHP <= 0f;
+        invincibilityTimers.Clear();
+        globalInvincibleTimer = 0f;
+        globalInvincibleHold = false;
+        NotifyHealthChanged();
+        NotifyStaminaChanged();
+    }
+
     // ───────────────────────── 成长扩展点（占位，逻辑留空） ─────────────────────────
     // 玩家后续可能通过技能 / 道具 / 存档加成提升上限与恢复量，统一从这三个方法接入。
     // 现在按要求留空：接入时在方法体内实现（建议同时触发对应事件，让 HUD 立即刷新；

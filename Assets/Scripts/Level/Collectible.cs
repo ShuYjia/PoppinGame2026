@@ -1,3 +1,4 @@
+using System.Globalization;
 using UnityEngine;
 
 /// <summary>
@@ -10,6 +11,9 @@ using UnityEngine;
 /// </summary>
 public class Collectible : MonoBehaviour
 {
+    [Tooltip("稳定存档 ID；留空时由类型和场景位置生成。")]
+    public string saveId;
+
     public enum Kind
     {
         Star,
@@ -35,6 +39,21 @@ public class Collectible : MonoBehaviour
     private bool collected;
     private float pickupTimer;
     private SpriteRenderer spriteRenderer;
+
+    public string SaveId
+    {
+        get
+        {
+            if (!string.IsNullOrEmpty(saveId))
+                return saveId;
+
+            Vector3 p = transform.position;
+            return string.Format(
+                CultureInfo.InvariantCulture,
+                "{0}:{1:F3}:{2:F3}",
+                kind, p.x, p.y);
+        }
+    }
 
     private void Awake()
     {
@@ -104,7 +123,19 @@ public class Collectible : MonoBehaviour
         }
 
         collected = true;
+        if (LevelManager.Instance != null)
+            LevelManager.Instance.RegisterCollected(this);
         foreach (Collider2D c in GetComponents<Collider2D>())
             c.enabled = false;
+    }
+
+    public void RestoreCollected()
+    {
+        collected = true;
+        if (spriteRenderer != null)
+            spriteRenderer.enabled = false;
+        foreach (Collider2D c in GetComponents<Collider2D>())
+            c.enabled = false;
+        gameObject.SetActive(false);
     }
 }
