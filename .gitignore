@@ -92,3 +92,21 @@ crashlytics-build.properties
 
 # 临时排查脚本/预览产物（agent 工作暂存，非 Unity 资产）
 /_doc_inspect/
+
+# 像素画 / AI 出图工具产物（非 Unity 资产；仅忽略新增产物，已入库文件保持跟踪）
+/otae_stand_pixel/fuyuan/
+/otae_stand_pixel/otae_idle_24/
+/otae_stand_pixel/otae_idle_blink/
+/otae_stand_pixel/otae_idle_fixed/
+/otae_stand_pixel/make_otae_idle_blink.py
+/otae_stand_pixel/make_otae_idle_fixed.py
+/otae_stand_pixel/qc_otae_idle_fixed.py
+/otae_stand_pixel_v3/
+/outputs/my-image/edit-*.png
+/outputs/my-image/poppin-attack-spritesheet-6x5.png
+/outputs/my-image/poppin-shoot-6x5.png
+/outputs/pixel_poster_title/
+
+# 根目录临时对比图 / 排查脚本
+/_*.png
+/_proto_block.py
