@@ -300,7 +300,7 @@ Animator:
   m_GameObject: {fileID: 5204710082515036357}
   m_Enabled: 1
   m_Avatar: {fileID: 0}
-  m_Controller: {fileID: 9100000, guid: 2d55f64561a55f942b799935d3a0e76b, type: 2}
+  m_Controller: {fileID: 9100000, guid: 07aa419ca9328bc458ba36880b04a53d, type: 2}
   m_CullingMode: 0
   m_UpdateMode: 0
   m_ApplyRootMotion: 0
@@ -395,18 +395,6 @@ MonoBehaviour:
   OnTakeDamage:
     m_PersistentCalls:
       m_Calls:
-      - m_Target: {fileID: 1195006281992233877}
-        m_TargetAssemblyTypeName: PlayerAnimatorView, Assembly-CSharp
-        m_MethodName: PlayHurt
-        m_Mode: 1
-        m_Arguments:
-          m_ObjectArgument: {fileID: 0}
-          m_ObjectArgumentAssemblyTypeName: UnityEngine.Object, UnityEngine
-          m_IntArgument: 0
-          m_FloatArgument: 0
-          m_StringArgument: 
-          m_BoolArgument: 0
-        m_CallState: 2
       - m_Target: {fileID: 8645765346679403915}
         m_TargetAssemblyTypeName: PlayerController, Assembly-CSharp
         m_MethodName: GetHurt

@@ -17,6 +17,7 @@ GameObject:
   - component: {fileID: 7257393544038859478}
   - component: {fileID: 8231833022813553371}
   - component: {fileID: 8704990125057575768}
+  - component: {fileID: 4051136039418299552}
   m_Layer: 7
   m_Name: Boar
   m_TagString: Untagged
@@ -325,7 +326,45 @@ MonoBehaviour:
   killScore: 50
   groundMask:
     serializedVersion: 2
-    m_Bits: 4294967103
+    m_Bits: 55
   bodyHalfWidth: 0.7
   cliffProbeDepth: 0.6
   spriteFacesRight: 0
+--- !u!114 &4051136039418299552
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5270073406695148428}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 4bf350a58ff84554eb358d736c5eff9c, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  sequence: {fileID: 8231833022813553371}
+  bindings:
+  - stateId: Idle
+    playbackName: Idle
+    loop: 1
+    exitNormalizedTime: 1
+  - stateId: Walk
+    playbackName: Walk
+    loop: 1
+    exitNormalizedTime: 1
+  - stateId: Run
+    playbackName: Run
+    loop: 1
+    exitNormalizedTime: 1
+  - stateId: Attack
+    playbackName: Hit
+    loop: 0
+    exitNormalizedTime: 1
+  - stateId: Hurt
+    playbackName: Hit
+    loop: 0
+    exitNormalizedTime: 1
+  - stateId: Dead
+    playbackName: Hit
+    loop: 0
+    exitNormalizedTime: 1

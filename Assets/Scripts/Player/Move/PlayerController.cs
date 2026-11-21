@@ -9,7 +9,7 @@ using UnityEngine.InputSystem;
 ///
 /// 本组件与三个协作组件挂在同一个 GameObject 上：
 /// - <see cref="PlayerGroundSensor"/>：物理检测（脚底薄盒探测、区域遮挡），不含规则状态。
-/// - <see cref="PlayerAnimatorView"/>：Animator 参数写入、精灵翻转、闪避特效镜像。
+/// - <see cref="PlayerAnimatorView"/>：代码动画有限状态机（读本组件的只读状态决定播哪段）、精灵翻转、闪避特效镜像。
 /// - <see cref="CharacterState"/>：体力 / 血量双资源（HP + SP）的数值与事件，动作规则仍由本组件判定。
 ///
 /// 设计要点：
@@ -18,8 +18,8 @@ using UnityEngine.InputSystem;
 /// 2. 地面检测使用贴合脚底的薄盒（几何计算在 PlayerGroundSensor），配合“土狼时间”和“起跳后锁定”，
 ///    既不会悬空误判，也不会一帧内连跳。
 /// 3. 起跳速度由跳跃高度和当前重力反推，改重力后不需要重新调参；
-///    riseGravityMultiplier 经调校使 v0 ≥ 13，对齐 ksm.controller 空中混合树的
-///    JumpStart 阈值（v0 = √(2·g·rise·jumpHeight)，下落仍由 fallGravityMultiplier 主导）。
+///    riseGravityMultiplier 经调校使 v0 ≥ 13，高于动画选择器的 JumpStart 分档点（11），
+///    保证起跳第一帧就进 JumpStart 姿势（v0 = √(2·g·rise·jumpHeight)，下落仍由 fallGravityMultiplier 主导）。
 ///    jumpHeight 是理想连续高度：固定步长（0.02s）积分会让实测顶点低约 v0·dt/2，
 ///    已按 rise=3.58 对应的 v0 做补偿（2.90 → 实测顶点 ≈2.76）。
 /// 4. 移动速度分为走 / 跑两档（speed=5 / runSpeed=8）：键盘默认奔跑、按住 Ctrl
@@ -28,12 +28,12 @@ using UnityEngine.InputSystem;
 /// 5. 蹲下（接地）时不能主动水平移动，但可被场景机关 / 敌人推动，且可以直接起跳；
 ///    在空中新按下蹲下键会锁存一次“下潜”：强制高速下落直至落地并转入蹲下，
 ///    期间保留空中左右操控、禁止起跳。
-/// 6. 动画由 ksm.controller 驱动：水平速度写 Speed，竖向速度写 velocityY（空中混合树），
-///    接地状态写 isGround，蹲下状态写 IsCrouching（驱动 crouchDown 渐蹲过渡与 crouchIdle
-///    蹲姿摆动两个状态）；参数写入集中在 PlayerAnimatorView。
-/// 7. 闪避（Shift / 手柄右肩键）是一次固定时长、固定速度的水平冲刺：触发 Animator 的
-///    Dodge 触发器进入 sprint 片段，该片段同时驱动子物体 "Sprite Mask/111_export-export"
-///    的激活与后滑特效；冲刺期间锁定水平速度并暂停常规动画参数，结束后进入冷却。
+/// 6. 动画不再由 Animator 参数驱动：本组件只维护只读状态（IsGrounded / velocityY / IsCrouching /
+///    IsRunning / IsWalking / IsDodging / IsHurt / IsDead），由 PlayerAnimatorView 里的代码
+///    动画 FSM 每帧读取并决定播哪段。本组件不写 Animator 参数、不调 Animator。
+/// 7. 闪避（Shift / 手柄右肩键）是一次固定时长、固定速度的水平冲刺：动画 FSM 进入 Dodge
+///    播 sprint 片段，该片段同时驱动子物体 "Sprite Mask/111_export-export"
+///    的激活与后滑特效；冲刺期间锁定水平速度，结束后进入冷却。
 ///    冲刺距离 ≈ dodgeSpeed × dodgeDuration，两者均可在 Inspector 中调整；dodgeDuration
 ///    与 sprint 片段等长（≈0.28s），位移与动画同生同灭——时长短于片段会让角色在冲刺姿势中
 ///    空滑（动画没播完人停了），长于片段会让角色以冲刺速度幽灵滑行（动画播完了人还在动），
@@ -45,12 +45,11 @@ using UnityEngine.InputSystem;
 ///    无敌帧为持有型开关（CharacterState.HoldGlobalInvincible）：闪避开始持有、
 ///    IsDodging 结束瞬间同步解除——闪避过程中无法掉血，不用计时器判断，
 ///    与受伤后的按来源无敌（字典计时）彻底分离、结构上不可能共用计时器。
-/// 8. 普通攻击（J / 手柄北键 △）：触发 ksm.controller 的 normalAttack 片段，并在角色前方
+/// 8. 普通攻击（J / 手柄北键 △）：通知动画 FSM 进入 Attack（播 normalAttack 片段），并在角色前方
 ///    发射一枚音波（纯表现：飞行、撞墙/超时消失，无伤害；体力消耗见第 9 条）。攻击效果窗口
 ///    （attackDuration）内移动速度按 attackMoveMultiplier 降低（不锁定）。
-///    空中攻击不触发攻击片段——AnyState→空中状态的既有结构会在一帧内把它切回空中姿势，
-///    且残留的触发器会在落地时误触发一次攻击；空中攻击改为纯机械效果：立即由上升切入
-///    下落，并在攻击窗口内把下落速度限制在 attackFallSpeed，到期后恢复正常下落。
+///    空中攻击不通知动画 FSM——空中攻击只做机械效果：立即由上升切入下落，并在攻击窗口内
+///    把下落速度限制在 attackFallSpeed，到期后恢复正常下落；这样也不会在地面误播攻击片段。
 ///    伤害 / 命中等战斗数值仍留待战斗系统实现时接入（音波预制体即扩展点）。
 /// 9. 体力 / 血量由同物体上的 <see cref="CharacterState"/> 托管（双资源模型，策划案 3.1 定稿）：
 ///    跳跃 / 闪避 / 攻击为一次性消耗，地面奔跑按帧持续消耗（数值均以 60fps 为基准、
@@ -62,17 +61,16 @@ using UnityEngine.InputSystem;
 /// 10. 受伤（受击硬直）：CharacterState 真正扣到血时触发它的 OnTakeDamage 事件，参数即攻击者
 ///    Transform；本组件的 <see cref="GetHurt"/> 订阅该事件（Inspector 里挂的动态监听），
 ///    进入硬直后锁死移动 / 跳跃 / 攻击 / 闪避，并把角色朝背离攻击者的方向推开（只清水平速度，
-///    空中被打继续下落）。解除靠受伤动画播完（HurtAnimation.OnStateExit → <see cref="EndHurt"/>），
-///    另有 hurtDuration 兜底计时与 OnDisable 兜底，保证玩家不会被永久锁死。
-///    受伤动画播在 ksm.controller 的 HurtLayer（Override 层，权重 1）：默认空状态不写任何属性，
-///    基础层 locomotion 照常；进 hurt 状态时覆盖精灵，播完回空状态，基础层自动接回。
+///    空中被打继续下落）。硬直时长由 hurtDuration 计时决定（到期在 FixedUpdate / OnDisable 解除），
+///    动画层只负责把这段硬直表现为 Hurt 状态：播一遍受伤片段、停在末帧等硬直结束。
+///    兜底计时与 OnDisable 双保险，保证玩家不会被永久锁死。
 /// 11. 死亡：CharacterState 把 HP 打到 0 时触发它的 Died / OnDie（同一时刻的两个出口），
 ///    本组件的 <see cref="PlayerDead"/> 收到后：禁用 GamePlay 输入表、清掉冲刺 / 下潜 / 硬直等
 ///    进行中的状态，并**横向锁死刚体**（清掉水平速度 + freeze X 轴约束——尸体不能左右移动，
 ///    也不能被 Boar 撞着横着滑）。纵向一律放任：死亡瞬间的上升 / 下落速度原样保留，
 ///    FixedUpdate 里继续照常施加重力与最大下落速度限制（空中死亡自然落地、躺下时被地板接住）。
 ///    Update 不再采样输入、FixedUpdate 不再驱动移动，动画由
-///    <see cref="PlayerAnimatorView"/> 写 isDead 进入 ksmDie1 死亡状态。
+///    <see cref="PlayerAnimatorView"/> 读到 IsDead 后进入 Dead（ksmDie1）。
 ///    两条订阅通路（场景持久化监听 + 代码兜底）靠 deathHandled 幂等，重复注册也只清理一次。
 ///    UI / 音乐 / 复活留给后续迭代（复活时记得解除 FreezePositionX）。
 /// </summary>
@@ -103,7 +101,7 @@ public class PlayerController : MonoBehaviour
     [SerializeField]
     private PlayerGroundSensor groundSensor;
 
-    [Tooltip("动画控制组件（Animator 参数 / 精灵翻转 / 闪避特效），与控制器挂在同一个 GameObject 上。")]
+    [Tooltip("动画控制组件（代码动画 FSM / 精灵翻转 / 闪避特效），与控制器挂在同一个 GameObject 上。")]
     [SerializeField]
     private PlayerAnimatorView animatorView;
 
@@ -211,7 +209,7 @@ public class PlayerController : MonoBehaviour
     [Header("受伤")]
     [Tooltip("受击后被推开的冲量（ForceMode2D.Impulse）。刚体质量为 1，所以数值 ≈ 推开瞬间的水平速度（单位/秒）；玩家线性阻尼为 0，击退距离 ≈ 本值 × 受伤硬直时长。")]
     public float hurtForce = 8f;
-    [Tooltip("受伤硬直时长（秒）：期间锁死操作（不能移动 / 跳跃 / 攻击 / 闪避），到期兜底解除。\n正常解除靠受伤动画播完（HurtAnimation.OnStateExit → EndHurt）；本值只是保险——动画层没挂上、动画缺失或动画被别的状态打断时，也不会把玩家永久锁死。调到与受伤动画等长即可（当前 hurt 片段 0.4s）。")]
+    [Tooltip("受伤硬直时长（秒）：期间锁死操作（不能移动 / 跳跃 / 攻击 / 闪避），到期解除。\n这是硬直时长的唯一权威——动画只负责把这段硬直表现为 Hurt 状态（播一遍受伤片段、停在末帧），不再反过来结束硬直。调到与受伤动画等长即可（hurt 片段 0.2s / ksmHurt2 1.0s）。")]
     public float hurtDuration = 0.4f;
 
     // ───────────────────────────── 运行时状态 ─────────────────────────────
@@ -249,7 +247,7 @@ public class PlayerController : MonoBehaviour
     /// <summary>
     /// 是否处于受伤硬直中：受击瞬间（<see cref="GetHurt"/>）置真，期间锁死移动 / 跳跃 / 攻击 / 闪避
     /// 且不再接管水平速度（保留击退位移）。解除走 <see cref="EndHurt"/>：
-    /// 受伤动画播完（HurtAnimation.OnStateExit）、兜底计时到期、或组件禁用，三者取其先到。
+    /// hurtDuration 计时到期、或组件禁用，两者取其先到。动画不再参与硬直的结束。
     /// </summary>
     public bool IsHurt { get; private set; }
 
@@ -332,7 +330,7 @@ public class PlayerController : MonoBehaviour
     private bool jumpCutPending;
     private bool isJumping;
 
-    private float hurtTimer;            // 受伤硬直的兜底计时（正常解除走 HurtAnimation.OnStateExit → EndHurt）
+    private float hurtTimer;            // 受伤硬直的计时（到期在 FixedUpdate 里 EndHurt）
 
     // 死亡处理是否已执行过（幂等标记，与「是否死亡」不是一回事）：
     // OnDie 有两条并行通路（场景持久化监听 + 代码兜底订阅），重复注册时会走到 PlayerDead 两次。
@@ -508,7 +506,7 @@ public class PlayerController : MonoBehaviour
                 SetCrouching(false);
             if (state != null)
                 state.SetCrouching(IsCrouching);
-            UpdateAnimation();
+            RefreshVelocityY();
             return;
         }
 
@@ -557,7 +555,7 @@ public class PlayerController : MonoBehaviour
         if (state != null)
             state.SetCrouching(IsCrouching);
         UpdateFacing();
-        UpdateAnimation();
+        RefreshVelocityY();
 
     }
 
@@ -588,8 +586,7 @@ public class PlayerController : MonoBehaviour
         if (hurtTimer > 0f)
         {
             hurtTimer = Mathf.Max(0f, hurtTimer - dt);
-            // 兜底解除：受伤动画没挂上 / 动画缺失时也不会把玩家永久锁死。
-            // 正常路径是动画播完时 HurtAnimation.OnStateExit 调 EndHurt，谁先到算谁。
+            // 硬直到期解除：这是硬直时长的唯一依据，动画层只负责表现。
             if (hurtTimer <= 0f)
                 EndHurt();
         }
@@ -719,28 +716,22 @@ public class PlayerController : MonoBehaviour
     // ─────────────────────────────── 动画 ───────────────────────────────
 
     /// <summary>
-    /// 把速度与接地状态交给动画组件。竖直速度、接地状态与蹲下状态每帧都写
-    /// （空中混合树依赖前两者，蹲下动画 crouchDown / crouchIdle 依赖 IsCrouching）；
-    /// Speed 只在接地且未蹲下 / 未下潜 / 未闪避时刷新，其余情况保持上一帧的值，
-    /// 让 idle / walk / run 维持在当前档位。
+    /// 刷新供动画 FSM 读取的竖直速度。动画状态由 <see cref="PlayerAnimatorView"/> 每帧根据本组件的
+    /// 只读状态自行决定，这里只维护 velocityY 这一个数据源，不再向 Animator 写任何参数。
     /// </summary>
-    private void UpdateAnimation()
+    private void RefreshVelocityY()
     {
-        if (animatorView == null || rb == null)
+        if (rb == null)
             return;
 
         velocityY = rb.velocity.y;
-
-        // 空中、蹲下、下潜、闪避均不驱动 Speed：分别保持落地前最后状态或播放冲刺片段。
-        bool driveLocomotion = IsGrounded && !IsCrouching && !diveLatch && !IsDodging;
-        animatorView.ApplyMotion(rb.velocity.x, velocityY, IsGrounded, driveLocomotion, IsCrouching);
     }
 
     // ─────────────────────────────── 闪避 ───────────────────────────────
 
     /// <summary>
     /// 请求一次闪避：不在冲刺中、冷却结束且体力足够时生效。方向取当前水平输入（超过死区），
-    /// 否则取当前朝向；触发 Animator 的 Dodge 触发器进入 sprint 片段。
+    /// 否则取当前朝向；动画 FSM 读到 IsDodging 后进入 Dodge 播 sprint 片段。
     /// 冲刺期间携带无敌帧：进入冲刺即持有全局无敌（<see cref="CharacterState.HoldGlobalInvincible"/>
     /// 置 true），IsDodging 结束瞬间同步解除——闪避过程中无法掉血，不用计时器判断；
     /// Inspector 调 dodgeDuration 时无敌帧随闪避状态自动跟随（两者同生同灭）。
@@ -790,7 +781,7 @@ public class PlayerController : MonoBehaviour
             state.HoldGlobalInvincible(true);
 
         if (animatorView != null)
-            animatorView.TriggerDodge();
+            animatorView.NotifyDodgeStarted();
 
         Dodged?.Invoke();
     }
@@ -824,9 +815,9 @@ public class PlayerController : MonoBehaviour
         if (!IsGrounded)
             airAttackCutPending = true;
 
-        // 只有地面攻击播放攻击片段（空中的处理见方法注释）。
+        // 只有地面攻击通知动画 FSM（空中的处理见方法注释）。
         if (IsGrounded && animatorView != null)
-            animatorView.TriggerAttack();
+            animatorView.NotifyAttackStarted();
 
         SpawnAttackWave();
 
@@ -1157,13 +1148,12 @@ public class PlayerController : MonoBehaviour
     /// 无敌帧 / 同一来源无敌挡下的伤害不会走到这里。
     /// 硬直期间：移动 / 跳跃 / 攻击 / 闪避全部不接受输入，水平速度也不再被接管（击退位移原样保留），
     /// 竖直方向照常走重力与下落限制（空中被打继续往下掉，不悬停）。
-    /// 解除走三条路径取其先到：① 受伤动画播完（HurtAnimation.OnStateExit → <see cref="EndHurt"/>）；
-    /// ② 兜底计时 hurtDuration 到期；③ 组件禁用 / 场景切换（OnDisable）。
+    /// 解除走两条路径取其先到：① 硬直计时 hurtDuration 到期；② 组件禁用 / 场景切换（OnDisable）。
+    /// 动画不参与解除——受伤片段只把这段硬直表现出来（播一遍、停在末帧）。
     ///
-    /// **硬直中重复进入会被忽略**（下面的 IsHurt 早退）：否则一次受击会播两遍受伤动画、
-    /// 击退也会更远——hurt 是 Trigger，硬直中再 SetTrigger 会留在队列里，等本次动画退场后
-    /// 又被消费一次；同时 hurtTimer 被重置会让滑行时长翻倍（玩家线性阻尼为 0，
-    /// 滑行距离 ∝ 硬直时长）。要「每次受击都有反馈」请调 <see cref="CharacterState.invincibleTime"/>，
+    /// **硬直中重复进入会被忽略**（下面的 IsHurt 早退）：否则击退会更远——hurtTimer 被重置会让
+    /// 滑行时长翻倍（玩家线性阻尼为 0，滑行距离 ∝ 硬直时长），动画也会被重复请求。
+    /// 要「每次受击都有反馈」请调 <see cref="CharacterState.invincibleTime"/>，
     /// 而不是在这里放行重入。
     /// </summary>
     /// <param name="attacker">攻击者（伤害来源）的 Transform；null 时无法算方向，退化为「背对当前朝向」推开。</param>
@@ -1203,8 +1193,8 @@ public class PlayerController : MonoBehaviour
     }
 
     /// <summary>
-    /// 解除受伤硬直，恢复操作。正常由受伤动画播完时的 HurtAnimation.OnStateExit 调用；
-    /// 兜底计时与 OnDisable 同样走这里（见 FixedUpdate / OnDisable）。重复调用没有副作用。
+    /// 解除受伤硬直，恢复操作。由硬直计时到期（FixedUpdate）与 OnDisable 调用；
+    /// 动画层不再调用它（受伤片段播完不等于硬直结束）。重复调用没有副作用。
     /// </summary>
     public void EndHurt()
     {
@@ -1269,9 +1259,8 @@ public class PlayerController : MonoBehaviour
             rb.constraints |= RigidbodyConstraints2D.FreezePositionX;
         }
 
-        // 4) Animator 只有一个出口——PlayerAnimatorView（本组件从不直接碰 Animator）。
-        if (animatorView != null)
-            animatorView.SetDead(true);
+        // 4) 动画不用通知：PlayerAnimatorView 每帧读 state.IsDead，下一帧就会进 Dead（ksmDie1）。
+        //    本组件依然不直接碰 Animator。
     }
 
     // ───────────────────────────── 复活 / 输入锁（关卡流程用） ─────────────────────────────
@@ -1315,8 +1304,9 @@ public class PlayerController : MonoBehaviour
 
         if (inputControl != null && !inputLocked)
             inputControl.GamePlay.Enable();
-        if (animatorView != null)
-            animatorView.SetDead(false);
+
+        // 动画不用通知：state.ResetToFull() 已清掉死亡标记，PlayerAnimatorView 下一帧读到
+        // IsDead = false 就会自动回到 Idle / 当前运动状态。
     }
 
     /// <summary>输入锁是否生效（通关结算 / 过场中）。</summary>

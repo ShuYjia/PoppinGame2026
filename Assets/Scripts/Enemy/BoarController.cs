@@ -1,3 +1,4 @@
+using Poppin.Animation;
 using UnityEngine;
 
 /// <summary>
@@ -89,12 +90,6 @@ public class BoarController : MonoBehaviour
     [Tooltip("美术是否朝右绘制。野猪素材朝左，保持 false。")]
     public bool spriteFacesRight;
 
-    // 序列帧片段名，与预制体上 SpriteSequencePlayer 的片段名对应。
-    private const string ClipIdle = "Idle";
-    private const string ClipWalk = "Walk";
-    private const string ClipRun = "Run";
-    private const string ClipHit = "Hit";
-
     public BoarState State { get; private set; } = BoarState.Patrol;
 
     /// <summary>1 朝右，-1 朝左。</summary>
@@ -103,7 +98,10 @@ public class BoarController : MonoBehaviour
     private Rigidbody2D rb;
     private CharacterState stats;
     private SpriteRenderer spriteRenderer;
-    private SpriteSequencePlayer sequence;
+
+    /// <summary>动画 FSM：行为状态只映射成动画状态，不直接操作序列帧播放器。</summary>
+    private EnemyAnimationStateMachine animFsm;
+
     private Attack contactAttack;
     private Collider2D[] ownColliders;
     private readonly RaycastHit2D[] castHits = new RaycastHit2D[4];
@@ -123,7 +121,7 @@ public class BoarController : MonoBehaviour
         rb = GetComponent<Rigidbody2D>();
         stats = GetComponent<CharacterState>();
         spriteRenderer = GetComponent<SpriteRenderer>();
-        sequence = GetComponent<SpriteSequencePlayer>();
+        animFsm = GetComponent<EnemyAnimationStateMachine>();
         contactAttack = GetComponent<Attack>();
         ownColliders = GetComponents<Collider2D>();
         rb.freezeRotation = true;
@@ -265,7 +263,7 @@ public class BoarController : MonoBehaviour
         {
             pauseTimer -= dt;
             SetHorizontalVelocity(0f);
-            PlayClip(ClipIdle);
+            PlayAnimation(EnemyAnimationState.Idle);
             if (pauseTimer <= 0f)
                 SetFacing(-Facing);
             return;
@@ -280,7 +278,7 @@ public class BoarController : MonoBehaviour
         }
 
         SetHorizontalVelocity(Facing * walkSpeed);
-        PlayClip(ClipWalk);
+        PlayAnimation(EnemyAnimationState.Walk);
     }
 
     private void TickCharge(float dt)
@@ -305,7 +303,7 @@ public class BoarController : MonoBehaviour
     {
         State = BoarState.Patrol;
         pauseTimer = 0f;
-        PlayClip(ClipWalk);
+        PlayAnimation(EnemyAnimationState.Walk);
     }
 
     private void EnterAlert()
@@ -313,7 +311,7 @@ public class BoarController : MonoBehaviour
         State = BoarState.Alert;
         stateTimer = alertDuration;
         FacePlayer();
-        PlayClip(ClipIdle);
+        PlayAnimation(EnemyAnimationState.Idle);
     }
 
     private void EnterCharge()
@@ -321,14 +319,14 @@ public class BoarController : MonoBehaviour
         State = BoarState.Charge;
         stateTimer = maxChargeTime;
         chargeDirection = Facing;
-        PlayClip(ClipRun);
+        PlayAnimation(EnemyAnimationState.Run);
     }
 
     private void EnterRecover()
     {
         State = BoarState.Recover;
         stateTimer = recoverTime;
-        PlayClip(ClipIdle);
+        PlayAnimation(EnemyAnimationState.Idle);
     }
 
     // ───────────────────────────── 受击 / 死亡 ─────────────────────────────
@@ -352,7 +350,7 @@ public class BoarController : MonoBehaviour
         State = BoarState.Hurt;
         stateTimer = hurtStun;
         SetHorizontalVelocity(HasGroundAhead(away) ? away * knockbackSpeed : 0f);
-        PlayClip(ClipHit, true);
+        PlayAnimation(EnemyAnimationState.Hurt, true);
     }
 
     private void OnDied()
@@ -369,7 +367,7 @@ public class BoarController : MonoBehaviour
                 c.enabled = false;
         }
 
-        PlayClip(ClipHit, true);
+        PlayAnimation(EnemyAnimationState.Dead, true);
 
         if (LevelManager.Instance != null)
             LevelManager.Instance.RegisterKill(killScore);
@@ -467,11 +465,15 @@ public class BoarController : MonoBehaviour
         return false;
     }
 
-    /// <summary>切换序列帧片段（Unity 对象不能用 ?. 判空：编辑器里缺组件时拿到的是「假 null」）。</summary>
-    private void PlayClip(string clipName, bool restart = false)
+    /// <summary>
+    /// 通知动画 FSM 切换状态（唯一出口）。行为 FSM 不碰 <see cref="SpriteSequencePlayer"/>：
+    /// Patrol → Walk / Alert → Idle / Charge → Run / Recover → Idle / Hurt → Hurt / Dead → Dead，
+    /// 具体播哪一段由动画 FSM 的绑定表决定。
+    /// </summary>
+    private void PlayAnimation(EnemyAnimationState state, bool restart = false)
     {
-        if (sequence != null)
-            sequence.Play(clipName, restart);
+        if (animFsm != null)
+            animFsm.ChangeState(state, restart);
     }
 
     private void SetHorizontalVelocity(float vx)

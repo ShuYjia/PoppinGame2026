@@ -1,79 +1,91 @@
+using Poppin.Animation;
 using UnityEngine;
-using UnityEngine.Events;
 
 /// <summary>
-/// 角色动画控制组件：把 PlayerController 算出的运动状态写入 Animator 参数，
-/// 并处理纯表现的部分（精灵左右翻转、闪避特效镜像）。三类 Animator 参数的含义：
+/// 角色动画控制组件：**代码动画有限状态机**的唯一宿主。
 ///
-/// - Speed(Float)：水平速度绝对值，idle / walk / run 的切换条件（阈值 0.1 起走 / 6 起跑）。
-/// - velocityY(Float)：竖直速度，空中状态「13」的 1D 混合树参数。
-/// - isGround(Bool)：是否接地，false 时 AnyState 进空中混合树，true 时回 JumpGround → idle。
-/// - IsCrouching(Bool)：是否蹲下，true 时 idle/walk/run 进 crouchDown（渐蹲过渡），
-///   播完接 crouchIdle（蹲姿摆动循环）；false 时回 idle。
-/// - Dodge(Trigger)：闪避，AnyState → sprint。
-/// - Attack(Trigger)：普通攻击，AnyState → normalAttack（仅地面攻击触发，见 PlayerController）。
-/// - hurt(Trigger)：受伤，HurtLayer（Override 层，权重 1）的 New State → 受伤状态，播完自动回空状态。
-/// - isDead(Bool)：死亡标记，true 时 AnyState → HurtLayer 的 ksmDie1，false 时 ksmDie1 → Exit 退回基础层。
-///   由 <see cref="SetDead"/> 写入（死亡那一刻一次 + 组件启用时同步一次），bool 不需要每帧刷新。
+/// 分工（重构后）：
+/// - <see cref="PlayerController"/> 只提供只读状态（是否接地、竖直速度、是否蹲下 / 跑 / 走 / 闪避 / 受伤 / 死亡），
+///   不再向 Animator 写任何参数；
+/// - 本组件每帧把这些状态拍成快照，交给 <see cref="PlayerAnimationStateSelector"/> 算出目标动画状态，
+///   再由 <see cref="AnimationStateMachine"/> 决定是否需要切换，最后由
+///   <see cref="AnimatorPlaybackBackend"/> 调 <c>Animator.Play</c> 播具体片段；
+/// - Animator 只是播片段的机器：不参与业务过渡、没有参数、没有 AnyState 过渡。
 ///
-/// velocityY、isGround 与 IsCrouching 必须每帧都写：漏写时混合树会停在默认值 velocityY = 0（最高点姿势），
-/// 而 isGround 一直是 false 时角色永远不会从空中状态落回；IsCrouching 漏写则蹲下动画不触发。
+/// 优先级固定为 Dead &gt; Hurt &gt; Dodge &gt; Attack &gt; Airborne &gt; Crouch &gt; Run &gt; Walk &gt; Idle，
+/// 具体规则见 <see cref="PlayerAnimationStateSelector"/>。
+///
+/// 纯表现的部分（精灵左右翻转、闪避特效镜像）仍留在本组件：它们与动画状态无关，只跟朝向 / 冲刺方向有关。
 /// </summary>
+[DefaultExecutionOrder(100)] // 晚于 PlayerController（默认 0）执行，保证读到的是一帧内算完的最新状态
 public class PlayerAnimatorView : MonoBehaviour
 {
     [Header("动画")]
-    [Tooltip("角色的 Animator。留空时自动从本物体获取（FirstLevel 的 Player 已挂 ksm.controller）。")]
+    [Tooltip("角色的 Animator。留空时自动从本物体获取。它应当挂 ksm_fsm.controller（纯片段、无参数）。")]
     [SerializeField]
     private Animator animator;
+
+    [Header("动画状态绑定")]
+    [Tooltip("状态 id → Animator 状态名。stateId 必须与 PlayerAnimationState 的枚举名一致（Hurt / Walk …），playbackName 是控制器里的状态名。")]
+    [SerializeField]
+    private AnimationStateBinding[] bindings = CreateDefaultBindings();
 
     [Header("闪避特效")]
     [Tooltip("闪避特效根物体（FirstLevel 场景中为 Player 下的 \"Sprite Mask\"）：sprint 片段通过它驱动子物体 \"111_export-export\" 的激活与位移，它同时是一个 SpriteMask 遮罩窗口（特效在窗口外可见）。向左闪避时会把它按 X 镜像到玩家左侧，配合特效贴图翻转与位置镜像，使特效整体镜像到冲刺方向的后方。留空时按 \"Sprite Mask\" 自动查找。")]
     [SerializeField]
     private Transform dodgeEffectRoot;
 
-    /// <summary>Animator 的 Speed 参数哈希，避免每帧字符串查找。</summary>
-    private static readonly int SpeedParam = Animator.StringToHash("Speed");
-
-    /// <summary>竖直速度参数（空中混合树的 1D 混合参数）。</summary>
-    private static readonly int VerticalVelocityParam = Animator.StringToHash("velocityY");
-
-    /// <summary>接地状态参数（驱动 AnyState → 空中状态 / 空中状态 → JumpGround）。</summary>
-    private static readonly int IsGroundParam = Animator.StringToHash("isGround");
-
-    /// <summary>Animator 的 Dodge 触发器哈希（ksm.controller 中新增的参数）。</summary>
-    private static readonly int DodgeParam = Animator.StringToHash("Dodge");
-
-    /// <summary>蹲下状态参数哈希（ksm.controller 中新增的参数）：驱动 crouchDown / crouchIdle 两个蹲下状态。</summary>
-    private static readonly int IsCrouchingParam = Animator.StringToHash("IsCrouching");
-
-    /// <summary>Animator 的 Attack 触发器哈希（ksm.controller 中新增的参数）。</summary>
-    private static readonly int AttackParam = Animator.StringToHash("Attack");
-
-    /// <summary>Animator 的 hurt 触发器哈希（ksm.controller 中新增的参数）：AnyState → HurtLayer 的受伤状态。</summary>
-    private static readonly int HurtParam = Animator.StringToHash("hurt");
-
-    /// <summary>
-    /// Animator 的死亡标记哈希（ksm.controller 中新增的参数）：true 时 AnyState → HurtLayer 的
-    /// ksmDie1 死亡状态（Override 层，权重 1，会盖住基础层的 locomotion）；false 时 ksmDie1 → Exit，
-    /// 基础层自动接回。bool 参数会一直保留在 Animator 上，不需要每帧刷新。
-    /// </summary>
-    private static readonly int IsDeadParam = Animator.StringToHash("isDead");
-
-    /// <summary>受伤状态名（ksm.controller 的 HurtLayer → ksmHurt2）的哈希，用于判断"是否已经在播受伤动画"。</summary>
-    private static readonly int HurtStateHash = Animator.StringToHash("ksmHurt2");
-
     private const string DodgeEffectRootName = "Sprite Mask";    // 闪避特效根物体（SpriteMask 遮罩窗口 + 特效之父）
     private const string DodgeEffectName = "111_export-export"; // 闪避特效子物体（sprint 片段驱动其激活与位移）
 
     private PlayerController controller;
     private SpriteRenderer spriteRenderer;
-    private CharacterState state;
-    private UnityAction<Transform> onTakeDamage;
+    private AnimationStateMachine machine;
+
+    private PlayerAnimationState currentState = PlayerAnimationState.Idle;
+    private bool stateStarted;
+
+    /// <summary>本帧有地面攻击请求（由 <see cref="NotifyAttackStarted"/> 置位，Update 消费一次）。</summary>
+    private bool attackRequested;
 
     private Transform dodgeEffect;
     private SpriteRenderer dodgeEffectRenderer;
     private Vector3 dodgeEffectRootBasePosition;
     private int dodgeDirection = 1;
+
+    /// <summary>默认绑定：状态 id 与 PlayerAnimationState 一致，片段名与新 Animator 控制器的状态名一致。</summary>
+    private static AnimationStateBinding[] CreateDefaultBindings()
+    {
+        return new[]
+        {
+            Bind("Idle", "idle"),
+            Bind("Walk", "walk"),
+            Bind("Run", "run"),
+            Bind("CrouchEnter", "crouchDown", false, 0.86f), // 旧控制器 exitTime 0.9 ≈ 归一化 0.86
+            Bind("CrouchIdle", "crouchIdle"),
+            Bind("JumpStart", "JumpStart"),
+            Bind("JumpRise", "JumpRise"),
+            Bind("JumpHighest", "JumpHighest"),
+            Bind("JumpFall", "JumpFall"),
+            Bind("Attack", "normalAttack", false),
+            Bind("Dodge", "sprint", false),
+            // 受伤播 hurt（带精灵帧序列的那段），不是 ksmHurt2 —— 后者只有颜色曲线，播出来只是变红。
+            Bind("Hurt", "hurt", false),
+            Bind("Dead", "ksmDie1", false),
+        };
+    }
+
+    private static AnimationStateBinding Bind(string stateId, string playbackName, bool loop = true,
+        float exitNormalizedTime = 1f)
+    {
+        return new AnimationStateBinding
+        {
+            stateId = stateId,
+            playbackName = playbackName,
+            loop = loop,
+            exitNormalizedTime = exitNormalizedTime
+        };
+    }
 
     private void Awake()
     {
@@ -81,8 +93,6 @@ public class PlayerAnimatorView : MonoBehaviour
             animator = GetComponent<Animator>();
         controller = GetComponent<PlayerController>();
         spriteRenderer = GetComponent<SpriteRenderer>();
-        state = GetComponent<CharacterState>();
-        onTakeDamage = OnTakeDamage;
 
         // 闪避特效根物体（FirstLevel 场景为 Player 下的 "Sprite Mask"）：sprint 片段通过它
         // 驱动子物体的激活与位移，它同时是遮罩窗口；向左闪避时按方向镜像它的位置。
@@ -95,142 +105,98 @@ public class PlayerAnimatorView : MonoBehaviour
             if (dodgeEffect != null)
                 dodgeEffectRenderer = dodgeEffect.GetComponent<SpriteRenderer>();
         }
+
+        machine = new AnimationStateMachine(new AnimatorPlaybackBackend(animator), bindings,
+            message => Debug.LogWarning(message, this));
+
+        WarnIfLegacyController();
+    }
+
+    /// <summary>
+    /// 旧 ksm.controller 里的状态名与本组件要播的名字大量重名（idle / walk / JumpStart …），
+    /// 挂错控制器不会直接报错，只会被控制器内部的条件过渡抢走画面。参数数量是最可靠的区分：
+    /// 新控制器纯片段、零参数；旧控制器有 Speed / isGround / Dodge 等 8 个参数。
+    /// </summary>
+    private void WarnIfLegacyController()
+    {
+        if (animator == null || animator.runtimeAnimatorController == null)
+            return;
+
+        if (animator.parameterCount > 0)
+        {
+            Debug.LogWarning(
+                "PlayerAnimatorView: Animator 上挂的还是带参数的旧控制器（" +
+                animator.runtimeAnimatorController.name + "）。动画已改为代码 FSM 直驱，请换成 ksm_fsm.controller。",
+                this);
+        }
     }
 
     private void OnEnable()
     {
-        // 代码兜底订阅：场景里 Inspector 挂的持久化监听可能因脚本重编译 / 场景重载而丢失或重复注册，
-        // 导致受击动画不播或播两遍。两套并存的正确性由 PlayHurt 自身的幂等保护保证。
-        // 先摘再挂，避免组件被重复 Enable 时挂上两份。
-        if (state == null)
-            state = GetComponent<CharacterState>();
-        if (state == null)
-            return;
-
-        // 死亡标记每次启用都同步一次（进去对着 state 的当前状态写，而不是假设从 false 开始）：
-        // 组件被反复 Enable / 场景重载 / domain reload 时，Animator 参数可能残留上一次的值，
-        // 不同步就会出现「人还好好的却在播死亡动画」。
-        SetDead(state.IsDead);
-
-        if (onTakeDamage == null)
-            return;
-
-        state.OnTakeDamage.RemoveListener(onTakeDamage);
-        state.OnTakeDamage.AddListener(onTakeDamage);
-    }
-
-    private void OnDisable()
-    {
-        if (state != null && onTakeDamage != null)
-            state.OnTakeDamage.RemoveListener(onTakeDamage);
-    }
-
-    /// <summary>受伤事件的代码兜底入口：参数（攻击者 Transform）本组件用不到，只负责播动画。</summary>
-    private void OnTakeDamage(Transform attacker)
-    {
-        PlayHurt();
-    }
-
-    // ───────────────────────────── 动画参数 ─────────────────────────────
-
-    /// <summary>
-    /// 写入本帧的动画参数。
-    /// </summary>
-    /// <param name="horizontalVelocity">带符号的水平速度，写入 Speed（取绝对值）。</param>
-    /// <param name="verticalVelocity">带符号的竖直速度，写入 velocityY（空中混合树）。</param>
-    /// <param name="grounded">是否接地，写入 isGround。</param>
-    /// <param name="crouching">是否蹲下，写入 IsCrouching（蹲下动画驱动参数，每帧都写）。</param>
-    /// <param name="driveLocomotion">
-    /// 是否刷新 Speed：接地且未蹲下 / 未下潜 / 未闪避时为 true；
-    /// 为 false 时保持上一帧的 Speed，让 idle / walk / run 维持在当前档位。
-    /// </param>
-    public void ApplyMotion(float horizontalVelocity, float verticalVelocity, bool grounded, bool driveLocomotion, bool crouching)
-    {
-        if (animator == null)
-            return;
-
-        animator.SetFloat(VerticalVelocityParam, verticalVelocity);
-        animator.SetBool(IsGroundParam, grounded);
-        animator.SetBool(IsCrouchingParam, crouching);
-
-        if (!driveLocomotion)
-            return;
-
-        animator.SetFloat(SpeedParam, Mathf.Abs(horizontalVelocity));
-    }
-
-    /// <summary>
-    /// 写死亡标记（ksm.controller 的 isDead → HurtLayer 的 ksmDie1）。
-    /// 唯一的写入口在这一个方法里——**别的组件不许直接碰 Animator 的 bool 参数**，
-    /// 保持「所有 Animator 写入集中在 PlayerAnimatorView」的分层。
-    /// 由 <see cref="PlayerController.PlayerDead"/> 在 HP 归零那一帧调用一次；
-    /// 参数本身不需要每帧刷新（bool 会一直留在 Animator 上）。
-    /// </summary>
-    public void SetDead(bool dead)
-    {
-        if (animator != null)
-            animator.SetBool(IsDeadParam, dead);
-    }
-
-    /// <summary>触发一次闪避（ksm.controller 的 AnyState → sprint）。</summary>
-    public void TriggerDodge()
-    {
-        if (animator != null)
-            animator.SetTrigger(DodgeParam);
-    }
-
-    /// <summary>触发一次普通攻击（ksm.controller 的 AnyState → normalAttack）。</summary>
-    public void TriggerAttack()
-    {
-        if (animator != null)
-            animator.SetTrigger(AttackParam);
-    }
-
-    /// <summary>
-    /// 触发一次受伤（ksm.controller 的 hurt 触发器 → HurtLayer 的受伤状态）。
-    /// 由同物体 CharacterState 的 OnTakeDamage 事件驱动（Inspector 里挂的监听，
-    /// 与 PlayerController.GetHurt 并列）——只有真正扣到血的伤害才会触发它。
-    /// 硬直的解除不归本组件管：受伤动画播完时由状态上的 HurtAnimation 回调 PlayerController.EndHurt。
-    ///
-    /// **重复触发会被挡住（两道闸）**：
-    /// ① 已经处于受伤硬直（controller.IsHurt）→ 直接忽略；
-    /// ② Animator 正在播受伤状态 → 忽略。
-    /// 原因：hurt 是 Trigger 参数，**在受伤状态播放途中再 SetTrigger 不会被立刻消费，
-    /// 而是留在队列里**，等本次动画退场回默认空状态后才被 New State → ksmHurt2 过渡消费
-    /// → 动画再播一遍（同时 GetHurt 也会重置硬直计时，击退滑行距离跟着翻倍）。
-    /// 运行时 UnityEvent 的持久化监听有可能被重复注册（脚本重编译 / 场景在 Play 中被重新加载时
-    /// 会重建监听列表），所以这里必须按"幂等"来写，不能假设一次伤害只回调一次。
-    /// </summary>
-    public void PlayHurt()
-    {
-        if (animator == null)
-            return;
-
-        if (controller != null && controller.IsHurt)
-            return;
-
-        if (IsPlayingHurtAnimation())
-            return;
-
-        animator.SetTrigger(HurtParam);
-    }
-
-    /// <summary>
-    /// 当前是否正在播受伤动画（扫所有层找名为 ksmHurt2 的状态）。
-    /// 不写死层序号，避免以后调整 controller 的层顺序时这里失效。
-    /// </summary>
-    private bool IsPlayingHurtAnimation()
-    {
-        if (animator == null)
-            return false;
-
-        for (int i = 0; i < animator.layerCount; i++)
+        // 每次启用都从 Idle 重新起手：复活 / 场景重载后不残留上一次的动画状态。
+        if (machine != null)
         {
-            if (animator.GetCurrentAnimatorStateInfo(i).shortNameHash == HurtStateHash)
-                return true;
+            machine.Reset();
+            currentState = PlayerAnimationState.Idle;
+            stateStarted = false;
+            attackRequested = false;
         }
+    }
 
-        return false;
+    private void Update()
+    {
+        if (machine == null || controller == null)
+            return;
+
+        machine.Tick(Time.deltaTime);
+
+        PlayerAnimationState target = PlayerAnimationStateSelector.Select(BuildSnapshot());
+        currentState = target;
+        attackRequested = false; // 攻击请求只在本帧有效
+
+        machine.ChangeState(target.ToString());
+        stateStarted = true;
+    }
+
+    /// <summary>把 PlayerController 的只读状态拍成本帧快照。这里只读，不改任何业务状态。</summary>
+    private PlayerAnimationSnapshot BuildSnapshot()
+    {
+        return new PlayerAnimationSnapshot
+        {
+            IsDead = controller.IsDead,
+            IsHurt = controller.IsHurt,
+            IsDodging = controller.IsDodging,
+            AttackRequested = attackRequested,
+            IsGrounded = controller.IsGrounded,
+            VerticalVelocity = controller.velocityY,
+            IsCrouching = controller.IsCrouching,
+            IsRunning = controller.IsRunning,
+            IsWalking = controller.IsWalking,
+            PreviousState = currentState,
+
+            // 首帧还没有播过任何状态，视为「上一个状态已播完」，否则 Idle 之类的状态会被误锁存。
+            PreviousStateFinished = !stateStarted || machine.IsFinished
+        };
+    }
+
+    // ───────────────────────────── 来自 PlayerController 的通知 ─────────────────────────────
+
+    /// <summary>
+    /// 通知「本次地面攻击已经开始」。只置一个本帧标记，不碰 Animator——
+    /// 具体播什么由 Update 里的选择器决定（空中攻击不会调到这里，所以不会误播地面攻击片段）。
+    /// </summary>
+    public void NotifyAttackStarted()
+    {
+        attackRequested = true;
+    }
+
+    /// <summary>
+    /// 通知「本次闪避已经开始」。闪避不需要额外状态：选择器读 PlayerController.IsDodging 就能得到 Dodge，
+    /// 保留这个入口是为了让调用方的语义明确（将来要加闪避特效时序时不必再改 PlayerController）。
+    /// </summary>
+    public void NotifyDodgeStarted()
+    {
+        // 目前无需额外记录：Dodge 的锁存由「上一帧状态 + 片段是否播完」推导。
     }
 
     // ───────────────────────────── 表现层 ─────────────────────────────

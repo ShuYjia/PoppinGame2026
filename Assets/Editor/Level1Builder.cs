@@ -340,6 +340,10 @@ public static class Level1Builder
         };
         seq.defaultClip = "Walk";
 
+        // 动画状态机：与 Boar.prefab 用同一份默认绑定（Idle / Walk / Run / Attack / Hurt / Dead），
+        // 行为控制器只通知动画状态，不再直接调用 SpriteSequencePlayer.Play。
+        go.AddComponent<EnemyAnimationStateMachine>();
+
         go.AddComponent<BoarController>();
         return go;
     }
