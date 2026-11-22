@@ -2,28 +2,33 @@ using Poppin.Animation;
 using UnityEngine;
 
 /// <summary>
-/// 敌人动画有限状态机：把「行为状态」（巡逻 / 蓄力 / 冲撞 / 受击 / 死亡…）翻译成
-/// 「动画状态」（Idle / Walk / Run / Attack / Hurt / Dead），再交给同物体上的
-/// <see cref="SpriteSequencePlayer"/> 逐帧播放。
+/// 敌人动画有限状态机：把「行为状态」（巡逻 / 追击 / 冲撞 / 受击 / 死亡…）翻译成
+/// 「动画状态」（Idle / Walk / Run / Attack / Hurt / Dead），再交给同物体上的播放后端播放。
 ///
 /// 边界：
-/// - 本组件**只**决定播哪段序列帧，不碰 Rigidbody2D、CharacterState、伤害或任何行为参数；
-/// - 行为状态仍由各自的控制器（<see cref="GroundEnemyController"/> / <see cref="BoarController"/>）负责，
-///   它们只在状态入口调用 <see cref="ChangeState"/>；
+/// - 本组件**只**决定播哪段动画，不碰 Rigidbody2D、CharacterState、伤害或任何行为参数；
+/// - 行为状态仍由各自的控制器（<see cref="GroundEnemyController"/> / <see cref="BoarController"/> /
+///   <see cref="FlyingEnemyController"/>）负责，它们只在状态入口调用 <see cref="ChangeState"/>；
 /// - 同一个状态重复请求不会重播（避免每帧调用把循环动画卡在第 0 帧），需要重播时传 restart。
+///
+/// 播放后端二选一：同物体有 <see cref="SpriteSequencePlayer"/> 就走序列帧（地面敌人）；
+/// 否则走 <see cref="AnimatorPlaybackBackend"/> 按 Animator 状态名播放（飞行敌人）。
 ///
 /// 默认绑定按策划案的地面敌人素材来：Idle / Walk / Run / Attack / Hurt / Dead，
 /// 其中 Attack / Hurt / Dead 都复用 Hit 片段（当前敌人只有四段美术）。具体敌人在 Inspector 里覆盖。
 /// </summary>
-[RequireComponent(typeof(SpriteSequencePlayer))]
 [DisallowMultipleComponent]
 public class EnemyAnimationStateMachine : MonoBehaviour
 {
-    [Tooltip("逐帧播放器（同物体）。留空时自动获取。")]
+    [Tooltip("逐帧播放器（同物体）。留空时自动获取；存在时使用序列帧后端（地面敌人）。")]
     [SerializeField]
     private SpriteSequencePlayer sequence;
 
-    [Tooltip("动画状态 id → 序列帧片段名。stateId 必须与 EnemyAnimationState 的枚举名一致，playbackName 是 SpriteSequencePlayer.clips 里的 name。")]
+    [Tooltip("Animator（同物体）。仅在没有 SpriteSequencePlayer 时使用，按状态名硬切播放（飞行敌人）。")]
+    [SerializeField]
+    private Animator animator;
+
+    [Tooltip("动画状态 id → 播放片段名。stateId 必须与 EnemyAnimationState 的枚举名一致；playbackName 在序列帧后端是 Clip.name，在 Animator 后端是状态名。")]
     [SerializeField]
     private AnimationStateBinding[] bindings = CreateDefaultBindings();
 
@@ -71,7 +76,19 @@ public class EnemyAnimationStateMachine : MonoBehaviour
         if (sequence == null)
             sequence = GetComponent<SpriteSequencePlayer>();
 
-        machine = new AnimationStateMachine(new SpriteSequenceBackend(sequence), bindings,
+        IAnimationPlaybackBackend backend;
+        if (sequence != null)
+        {
+            backend = new SpriteSequenceBackend(sequence);
+        }
+        else
+        {
+            if (animator == null)
+                animator = GetComponent<Animator>();
+            backend = new AnimatorPlaybackBackend(animator);
+        }
+
+        machine = new AnimationStateMachine(backend, bindings,
             message => Debug.LogWarning(message, this));
     }
 
